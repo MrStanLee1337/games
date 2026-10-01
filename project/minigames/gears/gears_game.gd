@@ -6,17 +6,21 @@ const GearsLevels := preload("res://minigames/gears/levels.gd")
 
 const CELL := 150.0
 const TRACK_X := 340.0
-const BOLT_Y0 := 130.0
+const BOLT_Y0 := 150.0
 const BOLT_DY := 95.0
-const GEAR_Y := 560.0
-const GEAR_R := 52.0
-const LINK_X := 300.0
-const COL_BG := Color("1b1d24")
-const COL_TRACK := Color("3a3f4d")
+const GEAR_Y := 540.0
+const GEAR_R := 64.0
+const COL_BG := Color("15171c")
+const COL_PANEL := Color("1d2027")
+const COL_TRACK := Color("2d313c")
+const COL_NOTCH := Color("3b4050")
 const COL_BOLT := Color("c9ced9")
 const COL_OPEN := Color("5ad17a")
-const COL_MARK := Color("e0b04a")
-const COL_GEAR := Color("8a93a8")
+const COL_GEAR := Color("7d869b")
+const COL_GEAR_HOT := Color("a3adc4")
+const COL_GEAR_IN := Color("23262f")
+const COL_LABEL := Color("8b92a3")
+const BOLT_COLORS: Array[Color] = [Color("ef6f6c"), Color("5aa9ef"), Color("f2c14e"), Color("b57bee")]
 
 var logic: GearsLogic
 var level_idx := 0
@@ -25,6 +29,7 @@ var bolt_shake: Array[float] = []
 var gear_angle: Array[float] = []
 var gear_shake: Array[float] = []
 var busy := false
+var hover := -1
 
 var info: Label
 var title: Label
@@ -100,6 +105,15 @@ func _gear_pos(i: int) -> Vector2:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		var h := -1
+		for i in logic.gears.size():
+			if event.position.distance_to(_gear_pos(i)) <= GEAR_R:
+				h = i
+		if h != hover:
+			hover = h
+			queue_redraw()
+		return
 	var mb := event as InputEventMouseButton
 	if mb == null or not mb.pressed or busy:
 		return
@@ -175,28 +189,45 @@ func _set_bolt_shake(v: float, bolt: int) -> void:
 	queue_redraw()
 
 
+func _rrect(rect: Rect2, fill: Color, radius: int, border := Color(0, 0, 0, 0), bw := 0) -> void:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = fill
+	sb.set_corner_radius_all(radius)
+	sb.border_color = border
+	sb.set_border_width_all(bw)
+	sb.anti_aliasing = true
+	draw_style_box(sb, rect)
+
+
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, Vector2(1280, 720)), COL_BG)
 	if logic == null:
 		return
 	var font := ThemeDB.fallback_font
-	# Тяги от шестерёнок к засовам.
-	for g in logic.gears.size():
-		for bolt in logic.gears[g]:
-			var by: float = BOLT_Y0 + bolt * BOLT_DY
-			var pts := PackedVector2Array([_gear_pos(g), Vector2(LINK_X - 20 - g * 8, by + 40), Vector2(LINK_X, by)])
-			draw_polyline(pts, Color(1, 1, 1, 0.25), 2.0)
+	var linked: Dictionary = {} if hover < 0 else logic.gears[hover]
+	# Панель двери.
+	_rrect(Rect2(60, BOLT_Y0 - 50, 1160, (logic.state.size() - 1) * BOLT_DY + 100), COL_PANEL, 18, COL_TRACK, 2)
 	# Засовы.
 	for b in logic.state.size():
 		var y := BOLT_Y0 + b * BOLT_DY
-		draw_rect(Rect2(TRACK_X, y - 4, CELL * 4 + 60, 8), COL_TRACK)
+		var col: Color = BOLT_COLORS[b % BOLT_COLORS.size()]
+		if linked.has(b):
+			_rrect(Rect2(80, y - 36, 1120, 72), Color(col, 0.16), 12, Color(col, 0.7), 2)
+		# Метка-цвет засова.
+		_rrect(Rect2(100, y - 24, 56, 48), col, 10)
+		draw_string(font, Vector2(100, y + 8), str(b + 1), HORIZONTAL_ALIGNMENT_CENTER, 56, 24, COL_BG)
+		# Шкала с делениями.
+		_rrect(Rect2(TRACK_X - 10, y - 6, CELL * 4 + 80, 12), COL_TRACK, 6)
 		for k in 5:
-			draw_rect(Rect2(TRACK_X + k * CELL + 26, y - 14, 8, 28), COL_TRACK)
-		var mx := TRACK_X + logic.open[b] * CELL + 30
-		draw_rect(Rect2(mx - 10, y - 30, 20, 8), COL_MARK)
+			_rrect(Rect2(TRACK_X + k * CELL + 26, y - 14, 8, 28), COL_NOTCH, 3)
+		# Целевая ячейка «открыто».
+		var tx := TRACK_X + logic.open[b] * CELL
+		_rrect(Rect2(tx - 4, y - 30, 68, 60), Color(COL_OPEN, 0.10), 14, Color(COL_OPEN, 0.8), 2)
+		# Сам засов.
 		var bx := TRACK_X + bolt_pos[b] * CELL + bolt_shake[b]
-		var col := COL_OPEN if logic.is_open(b) else COL_BOLT
-		draw_rect(Rect2(bx, y - 22, 60, 44), col)
+		var body: Color = COL_OPEN if logic.is_open(b) else COL_BOLT
+		_rrect(Rect2(bx, y - 22, 60, 44), body, 10)
+		_rrect(Rect2(bx + 6, y - 16, 8, 32), Color(col, 0.9), 4)
 	# Шестерёнки.
 	for g in logic.gears.size():
 		_draw_gear(_gear_pos(g), gear_angle[g] + gear_shake[g], font, g)
@@ -205,10 +236,20 @@ func _draw() -> void:
 func _draw_gear(c: Vector2, ang: float, font: Font, idx: int) -> void:
 	var teeth := 10
 	var pts := PackedVector2Array()
-	for i in teeth * 2:
-		var r := GEAR_R if i % 2 == 0 else GEAR_R - 12.0
-		var a := ang + i * TAU / (teeth * 2)
+	var hot := idx == hover
+	var r_out := GEAR_R + (4.0 if hot else 0.0)
+	for i in teeth * 4:
+		var r := r_out if (i / 2) % 2 == 0 else r_out - 14.0
+		var a := ang + i * TAU / (teeth * 4)
 		pts.append(c + Vector2(cos(a), sin(a)) * r)
-	draw_colored_polygon(pts, COL_GEAR)
-	draw_circle(c, 14.0, COL_BG)
-	draw_string(font, c + Vector2(-5, 7), str(idx + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, COL_GEAR)
+	draw_circle(c + Vector2(0, 5), r_out, Color(0, 0, 0, 0.3))
+	draw_colored_polygon(pts, COL_GEAR_HOT if hot else COL_GEAR)
+	draw_circle(c, 42.0, COL_GEAR_IN)
+	# Точки цветов засовов, которыми управляет шестерёнка.
+	var keys: Array = logic.gears[idx].keys()
+	var n := keys.size()
+	for j in n:
+		var a := -PI / 2.0 + (j - (n - 1) * 0.5) * 0.8
+		var p := c + Vector2(cos(a), sin(a)) * 27.0
+		draw_circle(p, 9.0, BOLT_COLORS[int(keys[j]) % BOLT_COLORS.size()])
+	draw_string(font, c + Vector2(-60, 100), "шестерёнка %d" % (idx + 1), HORIZONTAL_ALIGNMENT_CENTER, 120, 14, COL_LABEL)
