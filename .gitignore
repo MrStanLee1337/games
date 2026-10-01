@@ -9,3 +9,4 @@ builds/
 .DS_Store
 Thumbs.db
 desktop.ini
+build/
