@@ -1,0 +1,11 @@
+# Godot 4
+.godot/
+/android/
+
+# Экспортированные билды
+builds/
+
+# Системное
+.DS_Store
+Thumbs.db
+desktop.ini
