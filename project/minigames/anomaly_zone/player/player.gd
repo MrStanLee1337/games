@@ -36,6 +36,13 @@ signal died
 @export var invuln_time := 0.6
 @export var hit_knockback := 260.0
 
+@export_group("Болты")
+@export var throw_speed := 420.0
+@export var throw_up := 280.0
+## Добавка к броску вверх, пока зажато «вверх».
+@export var throw_up_boost := 260.0
+@export var throw_cooldown := 0.4
+
 @export_group("Камера")
 @export var look_ahead := 90.0
 @export var look_ahead_speed := 3.0
@@ -63,6 +70,8 @@ var _lock := 0.0
 var _lock_total := 1.0
 var _invuln := 0.0
 var _dead := false
+var _stun := 0.0
+var _throw_cd := 0.0
 var _shake := 0.0
 var _look := 0.0
 var _camera: Camera2D
@@ -96,21 +105,24 @@ func _physics_process(delta: float) -> void:
 	_mult_acc = 1.0
 	_tick(delta)
 
-	var dir := Input.get_axis(&"az_left", &"az_right")
+	var stunned := _stun > 0.0
+	var dir := 0.0 if stunned else Input.get_axis(&"az_left", &"az_right")
 	if dir != 0.0 and _dash_t <= 0.0:
 		facing = 1 if dir > 0.0 else -1
 	if is_on_floor():
 		_coyote = coyote_time
 		_air_dash_used = false
-	if Input.is_action_just_pressed(&"az_jump"):
+	if not stunned and Input.is_action_just_pressed(&"az_jump"):
 		_buffer = jump_buffer
-	if Input.is_action_just_pressed(&"az_dash"):
+	if not stunned and Input.is_action_just_pressed(&"az_dash"):
 		_try_dash(dir)
+	if Input.is_action_just_pressed(&"az_throw"):
+		_try_throw()
 
 	if _dash_t > 0.0:
 		velocity = Vector2(_dash_dir * dash_speed, 0.0)
 	else:
-		_move(delta, dir, slow)
+		_move(delta, dir, slow, ext != Vector2.ZERO)
 	velocity += ext * delta
 	move_and_slide()
 
@@ -131,6 +143,8 @@ func _tick(delta: float) -> void:
 	_dash_cd -= delta
 	_lock -= delta
 	_invuln -= delta
+	_stun -= delta
+	_throw_cd -= delta
 	if _dash_t > 0.0:
 		_dash_t -= delta
 		if _dash_t <= 0.0:
@@ -139,7 +153,7 @@ func _tick(delta: float) -> void:
 		_set_hp(minf(max_hp, hp + regen_per_sec * delta))
 
 
-func _move(delta: float, dir: float, slow: float) -> void:
+func _move(delta: float, dir: float, slow: float, pulled: bool) -> void:
 	# Пока действует блокировка управления, ввод почти не влияет — отброс не гасится.
 	var ctl := 1.0
 	if _lock > 0.0:
@@ -152,6 +166,8 @@ func _move(delta: float, dir: float, slow: float) -> void:
 		rate = ground_accel if on_floor else air_accel
 	else:
 		rate = ground_decel if on_floor else air_decel
+		if pulled and on_floor:
+			rate *= 0.25  # под действием внешней силы трение слабеет, иначе притяжение не чувствуется
 	velocity.x = move_toward(velocity.x, target, rate * ctl * delta)
 
 	var g := gravity * gravity_multiplier
@@ -185,6 +201,17 @@ func _try_dash(dir: float) -> void:
 	_dash_cd = dash_cooldown
 	_jumping = false
 	velocity.y = 0.0
+
+
+func _try_throw() -> void:
+	if _throw_cd > 0.0:
+		return
+	_throw_cd = throw_cooldown
+	var b := Bolt.new()
+	get_parent().add_child(b)
+	b.global_position = global_position + Vector2(facing * 14.0, -10.0)
+	var up := throw_up + (throw_up_boost if Input.is_action_pressed(&"az_up") else 0.0)
+	b.linear_velocity = Vector2(facing * throw_speed + velocity.x * 0.4, -up)
 
 
 # --- API для внешних сил -------------------------------------------------
@@ -222,11 +249,28 @@ func take_damage(amount: float, knock: Vector2 = Vector2.ZERO, ignore_invuln: bo
 	shake(clampf(amount * 0.3, 3.0, 9.0))
 	if knock != Vector2.ZERO:
 		apply_impulse(knock.normalized() * hit_knockback, 0.25)
-	if hp <= 0.0:
+	_check_death()
+	return true
+
+
+## Урон без неуязвимости, тряски и отброса — для луж и ядер (тикает каждый кадр).
+func damage_over_time(amount: float) -> void:
+	if _dead or amount <= 0.0:
+		return
+	_set_hp(maxf(0.0, hp - amount))
+	_check_death()
+
+
+## Оглушение: на это время ввод игнорируется.
+func stun(time: float) -> void:
+	_stun = maxf(_stun, time)
+
+
+func _check_death() -> void:
+	if hp <= 0.0 and not _dead:
 		_dead = true
 		velocity = Vector2.ZERO
 		died.emit()
-	return true
 
 
 func heal(amount: float) -> void:
@@ -246,6 +290,7 @@ func respawn(pos: Vector2, full_heal: bool) -> void:
 	velocity = Vector2.ZERO
 	_dash_t = 0.0
 	_lock = 0.0
+	_stun = 0.0
 	_dead = false
 	visible = true
 	_invuln = 0.8
