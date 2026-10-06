@@ -10,6 +10,7 @@ const RESPAWN_DELAY := 0.5
 var player: Player
 var level: TestLevel
 var hud: ZoneHud
+var inv_window: InventoryWindow
 
 var _checkpoint: Checkpoint
 var _respawning := false
@@ -31,6 +32,16 @@ func _ready() -> void:
 	world.add_child(player)
 	hud = ZoneHud.new()
 	hud_layer.add_child(hud)
+
+	var inv_layer := CanvasLayer.new()
+	inv_layer.layer = 20
+	add_child(inv_layer)
+	inv_window = InventoryWindow.new()
+	inv_layer.add_child(inv_window)
+	inv_window.setup(player.inventory, player)
+	hud.set_inventory(player.inventory)
+	player.message.connect(hud.show_message)
+	player.inventory.item_added.connect(_on_item_added)
 
 	player.set_camera_limits(level.bounds)
 	player.health_changed.connect(hud.set_health)
@@ -70,6 +81,10 @@ func _set_checkpoint(cp: Checkpoint) -> void:
 		_checkpoint.active = false
 	_checkpoint = cp
 	_checkpoint.active = true
+
+
+func _on_item_added(item: ItemData, _in_belt: bool) -> void:
+	hud.show_message("Подобран: " + item.display_name)
 
 
 func _on_checkpoint(cp: Checkpoint) -> void:

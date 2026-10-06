@@ -29,6 +29,10 @@ func _ready() -> void:
 	_anomaly(Electra.new(), Vector2(3100.0, FLOOR_Y - 40.0))
 	_anomaly(Trampolin.new(), Vector2(3300.0, FLOOR_Y - 20.0))
 	_anomaly(Voronka.new(), Vector2(3620.0, FLOOR_Y - 90.0))
+	# Предметы для обкатки инвентаря (временно): ряд у первого чекпоинта.
+	var ids: Array[StringName] = [&"kaplya", &"batareyka", &"pruzhina", &"gravi", &"meduza", &"plamya", &"aptechka", &"bint"]
+	for i in ids.size():
+		_pickup(ids[i], 150.0 + i * 60.0)
 	_checkpoint(80.0)
 	_checkpoint(1180.0)
 	_checkpoint(2230.0)
@@ -39,6 +43,13 @@ func _plat(x: float, y: float, w: float, h: float, one_way: bool = false) -> voi
 	p.position = Vector2(x, y)
 	p.size = Vector2(w, h)
 	p.one_way = one_way
+	add_child(p)
+
+
+func _pickup(id: StringName, x: float) -> void:
+	var p := Pickup.new()
+	p.item_id = id
+	p.position = Vector2(x, FLOOR_Y)
 	add_child(p)
 
 

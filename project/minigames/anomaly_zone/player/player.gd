@@ -5,6 +5,8 @@ extends CharacterBody2D
 
 signal health_changed(hp: float, max_hp: float)
 signal died
+## Короткое сообщение для HUD («Рюкзак полон» и т.п.).
+signal message(text: String)
 
 @export_group("Тело")
 @export var body_size := Vector2(24, 40)
@@ -43,6 +45,9 @@ signal died
 @export var throw_up_boost := 260.0
 @export var throw_cooldown := 0.4
 
+@export_group("Инвентарь")
+@export var belt_slots := 3
+
 @export_group("Камера")
 @export var look_ahead := 90.0
 @export var look_ahead_speed := 3.0
@@ -55,6 +60,7 @@ var gravity_multiplier := 1.0
 var regen_per_sec := 0.0
 
 var hp := 0.0
+var inventory := Inventory.new()
 var facing := 1
 
 var _force_acc := Vector2.ZERO
@@ -91,6 +97,7 @@ func _ready() -> void:
 	_camera.position_smoothing_speed = cam_smoothing
 	add_child(_camera)
 	_camera.make_current()
+	inventory.setup(belt_slots)
 	hp = max_hp
 	health_changed.emit(hp, max_hp)
 
@@ -118,6 +125,10 @@ func _physics_process(delta: float) -> void:
 		_try_dash(dir)
 	if Input.is_action_just_pressed(&"az_throw"):
 		_try_throw()
+	if Input.is_action_just_pressed(&"az_interact"):
+		_try_interact()
+	if Input.is_action_just_pressed(&"az_heal"):
+		use_best_consumable()
 
 	if _dash_t > 0.0:
 		velocity = Vector2(_dash_dir * dash_speed, 0.0)
@@ -201,6 +212,47 @@ func _try_dash(dir: float) -> void:
 	_dash_cd = dash_cooldown
 	_jumping = false
 	velocity.y = 0.0
+
+
+func _try_interact() -> void:
+	var best: Pickup = null
+	var best_d := INF
+	for n in get_tree().get_nodes_in_group(&"pickups"):
+		var pk := n as Pickup
+		if pk == null or not pk.is_in_reach(global_position):
+			continue
+		var d := global_position.distance_to(pk.global_position)
+		if d < best_d:
+			best_d = d
+			best = pk
+	if best:
+		best.collect(self)
+
+
+## Q: применить расходник, лучше всего подходящий под недостающее здоровье.
+func use_best_consumable() -> void:
+	if hp >= max_hp:
+		message.emit("Здоровье полное")
+		return
+	var slot := inventory.best_heal_slot(max_hp - hp)
+	if slot.x < 0:
+		message.emit("Нет расходников")
+		return
+	use_item(slot.x as Inventory.Zone, slot.y)
+
+
+## Применяет расходник из слота; false, если нельзя.
+func use_item(zone: Inventory.Zone, idx: int) -> bool:
+	var it := inventory.get_item(zone, idx)
+	if it == null or it.kind != ItemData.Kind.CONSUMABLE:
+		return false
+	if hp >= max_hp:
+		message.emit("Здоровье полное")
+		return false
+	inventory.consume(zone, idx)
+	heal(it.heal)
+	message.emit("%s: +%d HP" % [it.display_name, int(it.heal)])
+	return true
 
 
 func _try_throw() -> void:
