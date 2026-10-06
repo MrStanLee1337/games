@@ -102,6 +102,35 @@ func tint(c: Color) -> Color:
 	return out
 
 
+## Расстояние от точки до края зоны аномалии (0, если точка внутри). Нужно ауре артефактов.
+func edge_distance(p: Vector2) -> float:
+	return maxf(0.0, p.distance_to(global_position) - _extent())
+
+
+## Куда тянуть линию от игрока.
+func visual_center() -> Vector2:
+	return global_position
+
+
+## Над какой точкой рисовать стрелку ▲/▼.
+func top_point() -> Vector2:
+	return global_position + Vector2(0.0, -_extent() - 16.0)
+
+
+func get_shape_node() -> CollisionShape2D:
+	return _shape_node
+
+
+func _extent() -> float:
+	return 0.0
+
+
+static func _rect_distance(p: Vector2, r: Rect2) -> float:
+	var dx := maxf(maxf(r.position.x - p.x, 0.0), p.x - r.end.x)
+	var dy := maxf(maxf(r.position.y - p.y, 0.0), p.y - r.end.y)
+	return Vector2(dx, dy).length()
+
+
 func _set_state(s: State) -> void:
 	state = s
 	_state_t = 0.0

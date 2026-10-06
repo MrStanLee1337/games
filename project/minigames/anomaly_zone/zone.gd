@@ -11,6 +11,7 @@ var player: Player
 var level: TestLevel
 var hud: ZoneHud
 var inv_window: InventoryWindow
+var overlay: DebugOverlay
 
 var _checkpoint: Checkpoint
 var _respawning := false
@@ -30,6 +31,10 @@ func _ready() -> void:
 	world.add_child(level)
 	player = Player.new()
 	world.add_child(player)
+	overlay = DebugOverlay.new()
+	overlay.z_index = 50
+	overlay.visible = false
+	world.add_child(overlay)
 	hud = ZoneHud.new()
 	hud_layer.add_child(hud)
 
@@ -43,6 +48,7 @@ func _ready() -> void:
 	player.message.connect(hud.show_message)
 	player.inventory.item_added.connect(_on_item_added)
 
+	overlay.player = player
 	player.set_camera_limits(level.bounds)
 	player.health_changed.connect(hud.set_health)
 	player.died.connect(_on_player_died)
@@ -65,11 +71,28 @@ func _physics_process(_delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"az_respawn") and not player.is_dead() and not _respawning:
 		player.respawn(_spawn_pos(), false)
+	elif event.is_action_pressed(&"az_debug"):
+		overlay.visible = not overlay.visible
+	elif event.is_action_pressed(&"az_give_all"):
+		_give_all_artifacts()
 	elif event.is_action_pressed(&"az_exit"):
 		finish(false)
 		# Хаба пока нет: при отдельном запуске Esc закрывает игру.
 		if get_parent() == get_tree().root:
 			get_tree().quit()
+
+
+## F2: все артефакты, которых ещё нет у игрока (для тестов).
+func _give_all_artifacts() -> void:
+	var added := 0
+	for id in ArtifactDb.artifact_ids():
+		if player.inventory.has_id(id):
+			continue
+		if not player.inventory.add_item(ArtifactDb.make(id)):
+			hud.show_message("Рюкзак полон")
+			return
+		added += 1
+	hud.show_message("Выданы все артефакты" if added > 0 else "Все артефакты уже есть")
 
 
 func _spawn_pos() -> Vector2:

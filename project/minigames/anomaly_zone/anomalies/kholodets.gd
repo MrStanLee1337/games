@@ -26,6 +26,19 @@ func _new_shape() -> Shape2D:
 	return RectangleShape2D.new()
 
 
+func _world_rect() -> Rect2:
+	var w := size.x * scale_factor()
+	return Rect2(global_position + Vector2(-w * 0.5, -size.y), Vector2(w, size.y))
+
+
+func edge_distance(p: Vector2) -> float:
+	return _rect_distance(p, _world_rect())
+
+
+func top_point() -> Vector2:
+	return Vector2(global_position.x, global_position.y - size.y - 16.0)
+
+
 func _tick(delta: float) -> void:
 	if is_asleep():
 		return

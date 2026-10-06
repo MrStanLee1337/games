@@ -54,6 +54,23 @@ func _apply_shape(s: float) -> void:
 	_shape_node.position = Vector2(0.0, -sz.y * 0.5)
 
 
+func _world_rect() -> Rect2:
+	var k := scale_factor()
+	return Rect2(global_position + Vector2(-size.x * k * 0.5, -size.y * k), size * k)
+
+
+func edge_distance(p: Vector2) -> float:
+	return _rect_distance(p, _world_rect())
+
+
+func visual_center() -> Vector2:
+	return _world_rect().get_center()
+
+
+func top_point() -> Vector2:
+	return Vector2(global_position.x, _world_rect().position.y - 16.0)
+
+
 func _on_state(s: State) -> void:
 	if _particles == null:
 		return

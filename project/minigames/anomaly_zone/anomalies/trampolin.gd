@@ -24,6 +24,10 @@ func _apply_shape(s: float) -> void:
 	(_shape_node.shape as CircleShape2D).radius = radius * s
 
 
+func _extent() -> float:
+	return radius * scale_factor()
+
+
 func _reset_extra() -> void:
 	_reveal = 0.0
 

@@ -26,6 +26,15 @@ func _apply_shape(s: float) -> void:
 	(_shape_node.shape as CircleShape2D).radius = radius * s
 
 
+func _extent() -> float:
+	return radius * scale_factor()
+
+
+## Стрелку рисуем у ядра, а не на краю огромной зоны.
+func top_point() -> Vector2:
+	return global_position + Vector2(0.0, -core_radius * scale_factor() - 18.0)
+
+
 func _tick(delta: float) -> void:
 	if is_asleep():
 		return

@@ -103,6 +103,16 @@ func best_heal_slot(missing: float) -> Vector2i:
 	return best
 
 
+func has_id(id: StringName) -> bool:
+	for it in belt:
+		if it != null and it.id == id:
+			return true
+	for it in backpack:
+		if it != null and it.id == id:
+			return true
+	return false
+
+
 func belt_artifacts() -> Array[ItemData]:
 	var out: Array[ItemData] = []
 	for it in belt:

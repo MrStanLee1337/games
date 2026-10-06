@@ -48,6 +48,9 @@ signal message(text: String)
 @export_group("Инвентарь")
 @export var belt_slots := 3
 
+@export_group("Аура артефактов")
+@export var aura_radius := 160.0
+
 @export_group("Камера")
 @export var look_ahead := 90.0
 @export var look_ahead_speed := 3.0
@@ -98,6 +101,9 @@ func _ready() -> void:
 	add_child(_camera)
 	_camera.make_current()
 	inventory.setup(belt_slots)
+	var aura := BeltAura.new()
+	aura.radius = aura_radius
+	add_child(aura)
 	hp = max_hp
 	health_changed.emit(hp, max_hp)
 
