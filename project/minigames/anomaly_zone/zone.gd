@@ -8,13 +8,16 @@ const RESPAWN_DELAY := 0.5
 @onready var hud_layer: CanvasLayer = $HUD
 
 var player: Player
-var level: TestLevel
+var level: DemoLevel
 var hud: ZoneHud
 var inv_window: InventoryWindow
 var overlay: DebugOverlay
 
 var _checkpoint: Checkpoint
 var _respawning := false
+var _time := 0.0
+var _deaths := 0
+var _finished := false
 
 
 func _ready() -> void:
@@ -27,7 +30,7 @@ func _ready() -> void:
 	bg_layer.add_child(bg)
 	add_child(bg_layer)
 
-	level = TestLevel.new()
+	level = DemoLevel.new()
 	world.add_child(level)
 	player = Player.new()
 	world.add_child(player)
@@ -48,6 +51,7 @@ func _ready() -> void:
 	player.message.connect(hud.show_message)
 	player.inventory.item_added.connect(_on_item_added)
 
+	level.finish_sign.reached.connect(_on_finish)
 	overlay.player = player
 	player.set_camera_limits(level.bounds)
 	player.health_changed.connect(hud.set_health)
@@ -57,6 +61,12 @@ func _ready() -> void:
 	_set_checkpoint(level.checkpoints[0])
 	player.respawn(_spawn_pos(), true)
 	start()
+
+
+func _process(delta: float) -> void:
+	if not _finished:
+		_time += delta
+	hud.set_time(_time, _deaths)
 
 
 func _physics_process(_delta: float) -> void:
@@ -117,13 +127,20 @@ func _on_checkpoint(cp: Checkpoint) -> void:
 	hud.show_message("Чекпоинт")
 
 
+func _on_finish() -> void:
+	_finished = true
+	hud.show_finish(_time, _deaths)
+	finish(true, {"time": _time, "deaths": _deaths})
+
+
 func _on_player_died() -> void:
 	if _respawning:
 		return
+	_deaths += 1
 	_respawning = true
 	player.visible = false
 	await get_tree().create_timer(RESPAWN_DELAY).timeout
-	# Аномалии вернутся в исходное состояние (появятся на этапе 3).
+	# Аномалии возвращаются в исходное состояние.
 	get_tree().call_group(&"anomalies", &"reset_state")
 	player.respawn(_spawn_pos(), true)
 	_respawning = false

@@ -11,6 +11,10 @@ var _max_hp := 100.0
 var _hints: Label
 var _message: Label
 var _msg_tween: Tween
+var _time := 0.0
+var _deaths := 0
+var _finish_text := ""
+var _finish_sub := ""
 
 
 func _ready() -> void:
@@ -49,6 +53,22 @@ func set_inventory(inv: Inventory) -> void:
 	queue_redraw()
 
 
+func set_time(t: float, deaths: int) -> void:
+	_time = t
+	_deaths = deaths
+	queue_redraw()
+
+
+func show_finish(t: float, deaths: int) -> void:
+	_finish_text = "Прототип пройден"
+	_finish_sub = "Время: %s     Смертей: %d" % [_fmt_time(t), deaths]
+	queue_redraw()
+
+
+static func _fmt_time(t: float) -> String:
+	return "%d:%04.1f" % [floori(t / 60.0), fmod(t, 60.0)]
+
+
 func set_health(hp: float, max_hp: float) -> void:
 	_hp = hp
 	_max_hp = max_hp
@@ -74,6 +94,14 @@ func _draw() -> void:
 	draw_rect(Rect2(pos, Vector2(w * ratio, 18.0)), col)
 	draw_string(ThemeDB.fallback_font, pos + Vector2(6.0, 14.0), "HP %d" % int(ceilf(_hp)), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0, 0, 0, 0.85))
 	_draw_belt()
+	var font := ThemeDB.fallback_font
+	var vp := get_viewport_rect().size
+	draw_string(font, Vector2(vp.x - 324.0, 40.0), "%s   Смертей: %d" % [_fmt_time(_time), _deaths], HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 20, Color(1, 1, 1, 0.8))
+	if _finish_text != "":
+		draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.55))
+		draw_string(font, Vector2(0.0, vp.y * 0.5 - 20.0), _finish_text, HORIZONTAL_ALIGNMENT_CENTER, vp.x, 52, Color("5ad17a"))
+		draw_string(font, Vector2(0.0, vp.y * 0.5 + 30.0), _finish_sub, HORIZONTAL_ALIGNMENT_CENTER, vp.x, 26, Color("e8ecf4"))
+		draw_string(font, Vector2(0.0, vp.y * 0.5 + 76.0), "R — вернуться на чекпоинт     Esc — выход", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 16, Color(1, 1, 1, 0.6))
 
 
 func _draw_belt() -> void:
