@@ -4,11 +4,14 @@ extends "res://core/minigame.gd"
 const FALL_DAMAGE := 25.0
 const RESPAWN_DELAY := 0.5
 
+## Песочница взаимодействий вместо демо-уровня (sandbox.tscn).
+@export var sandbox := false
+
 @onready var world: Node2D = $World
 @onready var hud_layer: CanvasLayer = $HUD
 
 var player: Player
-var level: DemoLevel
+var level: ZoneLevel
 var hud: ZoneHud
 var inv_window: InventoryWindow
 var overlay: DebugOverlay
@@ -30,11 +33,12 @@ func _ready() -> void:
 	bg_layer.add_child(bg)
 	add_child(bg_layer)
 
-	level = DemoLevel.new()
+	level = SandboxLevel.new() if sandbox else DemoLevel.new()
 	world.add_child(level)
 	player = Player.new()
 	world.add_child(player)
 	world.add_child(AuraSystem.new())
+	world.add_child(AnomalyInteractions.new())
 	overlay = DebugOverlay.new()
 	overlay.z_index = 50
 	overlay.visible = false

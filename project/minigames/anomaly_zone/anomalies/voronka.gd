@@ -16,6 +16,12 @@ extends Anomaly
 @export var pull := 4000.0
 ## Урон ядра, HP в секунду.
 @export var core_dps := 25.0
+## Огненный смерч: урон в кольце вокруг ядра, HP/с при fire = 1.
+@export var fire_dps := 18.0
+
+## 0..2: сколько горящих Жарок затягивает Воронка (AnomalyInteractions).
+var fire := 0.0
+var _fire_target := 0.0
 
 
 func _init() -> void:
@@ -35,9 +41,35 @@ func top_point() -> Vector2:
 	return global_position + Vector2(0.0, -core_radius * scale_factor() - 18.0)
 
 
+func set_fire(v: float) -> void:
+	_fire_target = v
+
+
+## Кольцо огненного смерча: от ... до ... (px от центра).
+func fire_ring() -> Vector2:
+	var core := core_radius * scale_factor()
+	return Vector2(core * 1.6, core * 5.0)
+
+
+func debug_extra() -> String:
+	return "огонь %.2f" % fire if fire > 0.01 else ""
+
+
+func _reset_extra() -> void:
+	fire = 0.0
+	_fire_target = 0.0
+
+
 func _tick(delta: float) -> void:
+	fire = move_toward(fire, 0.0 if is_asleep() else _fire_target, 1.5 * delta)
 	if is_asleep():
 		return
+	if fire > 0.01:
+		var ring := fire_ring()
+		for p in _players():
+			var d := p.global_position.distance_to(global_position)
+			if d >= ring.x and d <= ring.y:
+				p.damage_over_time(dmg(fire_dps) * fire * delta)
 	var rr := radius * scale_factor()
 	var core := core_radius * scale_factor()
 	var sign_f := -1.0 if inverted else 1.0
@@ -91,3 +123,12 @@ func _draw() -> void:
 			var pos := Vector2.from_angle(ang) * rad
 			var near := 1.0 - u
 			draw_circle(pos, 1.5 + 2.0 * near, tint(Color(purple, 0.25 + 0.65 * near)))
+	if fire > 0.01:
+		# Огненный смерч: оранжевые языки кружат вокруг ядра.
+		var ring := fire_ring()
+		draw_arc(Vector2.ZERO, (ring.x + ring.y) * 0.5, 0.0, TAU, 48, Color(1.0, 0.45, 0.1, 0.07 * fire), ring.y - ring.x)
+		for k in 14:
+			var u := fposmod(k / 14.0 + _phase * 0.5 * flow, 1.0)
+			var rad := lerpf(ring.x, ring.y, fposmod(k * 0.37, 1.0))
+			var pos := Vector2.from_angle(u * TAU + _phase * 2.0 * flow) * rad
+			draw_circle(pos, 2.5 + 2.0 * fire, Color(1.0, 0.6 + 0.3 * fposmod(k * 0.5, 1.0), 0.15, 0.85))

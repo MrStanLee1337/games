@@ -31,6 +31,9 @@ func _draw() -> void:
 		_text(font, p, "%s  I=%.2f (база %.2f)" % [title, a.current_intensity, a.base_intensity])
 		_text(font, p + Vector2(0.0, 15.0), "мод ×%.2f%s  урон ×%.2f  [%s]" % [
 			a.mod_mult, " инв" if a.inverted else "", a.damage_mult, STATE_NAMES[a.state]])
+		var extra := a.debug_extra()
+		if extra != "":
+			_text(font, p + Vector2(0.0, 30.0), extra)
 	var pc := player.global_position
 	draw_arc(pc, player.aura_radius, 0.0, TAU, 72, Color(1, 1, 1, 0.3), 1.0)
 	var belt: Array[String] = []

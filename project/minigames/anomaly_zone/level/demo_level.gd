@@ -1,5 +1,5 @@
 class_name DemoLevel
-extends Node2D
+extends ZoneLevel
 ## Демо-уровень «Зона»: семь секций слева направо. Каждая показывает одну идею механики.
 ## Уровень собирается кодом, чтобы все координаты были в одном месте и легко правились.
 ##
@@ -11,15 +11,8 @@ extends Node2D
 ##  6. Холодец и Жарка — Медуза (медленно, без урона) или Пламя (сушит, но раздувает огонь).
 ##  7. Финиш.
 
-const FLOOR_Y := 600.0
 
-var bounds := Rect2(-200.0, -300.0, 8600.0, 1300.0)
-var fall_y := 960.0
-var checkpoints: Array[Checkpoint] = []
-var finish_sign: FinishSign
-
-
-func _ready() -> void:
+func _build() -> void:
 	_warmup()
 	_zharka()
 	_electra_corridor()
@@ -107,54 +100,4 @@ func _kholodets() -> void:
 
 
 func _finish() -> void:
-	finish_sign = FinishSign.new()
-	finish_sign.position = Vector2(8200.0, FLOOR_Y)
-	add_child(finish_sign)
-
-
-# --- Помощники -------------------------------------------------------------
-
-func _floor(x1: float, x2: float) -> void:
-	_plat(x1, FLOOR_Y, x2 - x1, 300.0)
-
-
-func _plat(x: float, y: float, w: float, h: float, one_way: bool = false) -> void:
-	var p := Platform.new()
-	p.position = Vector2(x, y)
-	p.size = Vector2(w, h)
-	p.one_way = one_way
-	add_child(p)
-
-
-func _anomaly(a: Anomaly, pos: Vector2) -> void:
-	a.position = pos
-	add_child(a)
-
-
-func _pickup(id: StringName, x: float, y: float = FLOOR_Y) -> void:
-	var p := Pickup.new()
-	p.item_id = id
-	p.position = Vector2(x, y)
-	add_child(p)
-
-
-func _checkpoint(x: float) -> void:
-	var c := Checkpoint.new()
-	c.position = Vector2(x, FLOOR_Y)
-	add_child(c)
-	checkpoints.append(c)
-
-
-func _sign(x: float, text: String, w: float = 320.0) -> void:
-	var s := SignPost.new()
-	s.position = Vector2(x, FLOOR_Y)
-	s.text = text
-	s.width = w
-	add_child(s)
-
-
-func _draw() -> void:
-	# Точечная сетка — чтобы глазом ловить скорость и расстояния.
-	for x in range(int(bounds.position.x), int(bounds.end.x), 100):
-		for y in range(int(bounds.position.y), int(bounds.end.y), 100):
-			draw_circle(Vector2(x, y), 2.0, Color(1, 1, 1, 0.07))
+	_finish_at(8200.0)

@@ -48,6 +48,8 @@ func _on_state(s: State) -> void:
 		p.stun(stun_time)
 	for b in _bolts():
 		b.linear_velocity = (b.global_position - center).normalized() * 320.0
+	# Разряд может уйти в лужу Холодца, которой касается Электра.
+	get_tree().call_group(&"anomaly_interactions", &"on_discharge", self)
 	_regen_bolts(7)
 
 

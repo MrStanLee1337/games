@@ -1,0 +1,51 @@
+class_name SandboxLevel
+extends ZoneLevel
+## Песочница взаимодействий аномалий: по сценке на каждую связь. Запуск — sandbox.tscn (F6).
+## Жарки здесь периодические, чтобы горели без провокации.
+
+
+func _build() -> void:
+	bounds = Rect2(-200.0, -300.0, 4900.0, 1300.0)
+	_floor(-200.0, 4700.0)
+
+	# 1. Жарка сушит Холодец. С обычной Жаркой жар до лужи не достаёт, с Пламенем — достаёт.
+	_checkpoint(80.0)
+	_sign(260.0, "Жар горящей Жарки сушит Холодец.\nОбычный до лужи не достаёт. Возьмите Пламя", 340.0)
+	_pickup(&"plamya", 480.0)
+	var z1 := Zharka.new()
+	z1.periodic = true
+	z1.period = 2.5
+	_anomaly(z1, Vector2(700.0, FLOOR_Y))
+	var k1 := Kholodets.new()
+	k1.size = Vector2(300.0, 18.0)
+	_anomaly(k1, Vector2(950.0, FLOOR_Y))
+
+	# 2. Электра касается лужи: разряд идёт по всей луже.
+	_checkpoint(1250.0)
+	_sign(1380.0, "Электра касается лужи — её разряд\nбьёт всех в луже. Бросьте болт", 320.0)
+	_pickup(&"batareyka", 1560.0)
+	var k2 := Kholodets.new()
+	k2.size = Vector2(400.0, 18.0)
+	_anomaly(k2, Vector2(1800.0, FLOOR_Y))
+	_anomaly(Electra.new(), Vector2(2010.0, FLOOR_Y - 40.0))
+
+	# 3. Воронка затягивает пламя Жарки: столб наклоняется, вокруг ядра — огненный смерч.
+	_checkpoint(2300.0)
+	_sign(2420.0, "Воронка затягивает огонь Жарки.\nС Грави огонь отбросит в другую сторону", 320.0)
+	_pickup(&"gravi", 2640.0)
+	var z3 := Zharka.new()
+	z3.periodic = true
+	z3.period = 2.0
+	z3.size = Vector2(60.0, 180.0)
+	_anomaly(z3, Vector2(2800.0, FLOOR_Y))
+	var v3 := Voronka.new()
+	v3.radius = 220.0
+	_anomaly(v3, Vector2(3000.0, 450.0))
+
+	# 4. Трамплин подбрасывает болт в Электру над головой.
+	_checkpoint(3500.0)
+	_sign(3620.0, "Бросьте болт на Трамплин —\nон долетит до Электры наверху", 300.0)
+	_anomaly(Trampolin.new(), Vector2(3900.0, FLOOR_Y - 20.0))
+	_anomaly(Electra.new(), Vector2(3900.0, 380.0))
+
+	_finish_at(4450.0)

@@ -17,6 +17,9 @@ extends Anomaly
 @export var period := 3.0
 
 var _hit_t := 0.0
+## Смещение пламени по x: Воронка рядом затягивает огонь к себе (AnomalyInteractions).
+var flame_offset := 0.0
+var _flame_target := 0.0
 var _particles: CPUParticles2D
 
 
@@ -51,12 +54,25 @@ func _new_shape() -> Shape2D:
 func _apply_shape(s: float) -> void:
 	var sz := size * s
 	(_shape_node.shape as RectangleShape2D).size = sz
-	_shape_node.position = Vector2(0.0, -sz.y * 0.5)
+	_shape_node.position = Vector2(flame_offset * 0.8, -sz.y * 0.5)
 
 
 func _world_rect() -> Rect2:
 	var k := scale_factor()
-	return Rect2(global_position + Vector2(-size.x * k * 0.5, -size.y * k), size * k)
+	return Rect2(global_position + Vector2(-size.x * k * 0.5 + flame_offset * 0.8, -size.y * k), size * k)
+
+
+func world_bounds() -> Rect2:
+	return _world_rect()
+
+
+## Куда тянет пламя (px по x). Действует только пока столб горит.
+func set_flame_pull(dx: float) -> void:
+	_flame_target = dx
+
+
+func debug_extra() -> String:
+	return "пламя dx=%d" % int(flame_offset) if absf(flame_offset) > 0.5 else ""
 
 
 func edge_distance(p: Vector2) -> float:
@@ -87,12 +103,21 @@ func _on_state(s: State) -> void:
 
 func _reset_extra() -> void:
 	_hit_t = 0.0
+	flame_offset = 0.0
+	_flame_target = 0.0
 	if _particles:
 		_particles.emitting = false
 
 
 func _tick(delta: float) -> void:
 	var r := scale_factor()
+	var want := _flame_target if state == State.ACTIVE else 0.0
+	if not is_equal_approx(flame_offset, want):
+		flame_offset = move_toward(flame_offset, want, 220.0 * delta)
+		_shape_node.position.x = flame_offset * 0.8
+		if _particles:
+			_particles.gravity = Vector2(flame_offset * 4.0, 0.0)
+			_particles.position.x = flame_offset * 0.4
 	match state:
 		State.IDLE:
 			if is_asleep():
@@ -139,15 +164,23 @@ func _draw() -> void:
 			draw_rect(Rect2(-w * 0.5, -h * frac, w, h * frac), tint(Color(orange, 0.55 * flick)))
 			draw_rect(r, tint(Color(orange, 0.5)), false, 1.5)
 		State.ACTIVE:
-			draw_rect(r, tint(Color("ff6a00", 0.35)))
-			draw_rect(Rect2(-w * 0.25, -h * 0.9, w * 0.5, h * 0.9), tint(Color("ffd36b", 0.5)))
+			# Столб наклоняется к Воронке: основание смещено слабо, верх — сильно.
+			var b := flame_offset * 0.4
+			var t := flame_offset * 1.2
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-w * 0.5 + b, 0.0), Vector2(w * 0.5 + b, 0.0),
+				Vector2(w * 0.5 + t, -h), Vector2(-w * 0.5 + t, -h)]), tint(Color("ff6a00", 0.35)))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-w * 0.25 + b, 0.0), Vector2(w * 0.25 + b, 0.0),
+				Vector2(w * 0.25 + t * 0.9, -h * 0.9), Vector2(-w * 0.25 + t * 0.9, -h * 0.9)]), tint(Color("ffd36b", 0.5)))
 			var n := 5
 			for i in n:
-				var x := -w * 0.5 + w * (i + 0.5) / n
+				var x := -w * 0.5 + w * (i + 0.5) / n + b
 				var top := h * (0.7 + 0.3 * sin(_phase * (9.0 + i * 1.7) + i))
 				var half := w / (2.0 * n)
+				var lean := (t - b) * top / h
 				draw_colored_polygon(
-					PackedVector2Array([Vector2(x - half, 0.0), Vector2(x, -top), Vector2(x + half, 0.0)]),
+					PackedVector2Array([Vector2(x - half, 0.0), Vector2(x + lean, -top), Vector2(x + half, 0.0)]),
 					tint(Color("ff9d2e", 0.7)))
 		_:
 			draw_rect(r, tint(Color(orange, 0.07)))

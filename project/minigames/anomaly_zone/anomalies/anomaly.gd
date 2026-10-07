@@ -117,6 +117,24 @@ func top_point() -> Vector2:
 	return global_position + Vector2(0.0, -_extent() - 16.0)
 
 
+## Габариты зоны в мировых координатах — для взаимодействий аномалий друг с другом.
+func world_bounds() -> Rect2:
+	var e := _extent()
+	return Rect2(global_position - Vector2(e, e), Vector2(e, e) * 2.0)
+
+
+## Зазор между двумя прямоугольниками (0 — касаются или пересекаются).
+static func rect_gap(a: Rect2, b: Rect2) -> float:
+	var dx := maxf(0.0, maxf(a.position.x - b.end.x, b.position.x - a.end.x))
+	var dy := maxf(0.0, maxf(a.position.y - b.end.y, b.position.y - a.end.y))
+	return Vector2(dx, dy).length()
+
+
+## Доп. строка для отладочного оверлея (F1).
+func debug_extra() -> String:
+	return ""
+
+
 func get_shape_node() -> CollisionShape2D:
 	return _shape_node
 
