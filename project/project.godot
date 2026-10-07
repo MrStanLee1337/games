@@ -13,6 +13,7 @@ config_version=5
 config/name="games"
 config/description="Сборник недельных прототипов, курс «Геймдизайн и проектирование игр», ШРВ ИТМО"
 run/main_scene="res://minigames/gears/gears.tscn"
+run/main_scene.zone="res://minigames/anomaly_zone/zone.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [display]
