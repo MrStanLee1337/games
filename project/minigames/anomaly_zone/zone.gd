@@ -34,6 +34,7 @@ func _ready() -> void:
 	world.add_child(level)
 	player = Player.new()
 	world.add_child(player)
+	world.add_child(AuraSystem.new())
 	overlay = DebugOverlay.new()
 	overlay.z_index = 50
 	overlay.visible = false
@@ -49,6 +50,7 @@ func _ready() -> void:
 	inv_window.setup(player.inventory, player)
 	hud.set_inventory(player.inventory)
 	player.message.connect(hud.show_message)
+	player.slot_selected.connect(hud.set_selected)
 	player.inventory.item_added.connect(_on_item_added)
 
 	level.finish_sign.reached.connect(_on_finish)
@@ -72,6 +74,12 @@ func _process(delta: float) -> void:
 func _physics_process(_delta: float) -> void:
 	if player.is_dead() or _respawning:
 		return
+	# Артефакт, упавший в пропасть, возвращается к последнему чекпоинту.
+	for n in get_tree().get_nodes_in_group(&"world_artifacts"):
+		var wa := n as WorldArtifact
+		if wa.global_position.y > level.fall_y:
+			wa.teleport(_checkpoint.global_position + Vector2(40.0, -20.0))
+			hud.show_message("%s упал в пропасть — лежит у чекпоинта" % wa.item.display_name)
 	if player.global_position.y > level.fall_y:
 		player.take_damage(FALL_DAMAGE, Vector2.ZERO, true)
 		if not player.is_dead():

@@ -78,6 +78,15 @@ func quick_move(zone: Zone, idx: int) -> bool:
 	return swap(zone, idx, target, free)
 
 
+## Забирает предмет из слота (например, чтобы бросить артефакт в мир).
+func take(zone: Zone, idx: int) -> ItemData:
+	var item := get_item(zone, idx)
+	if item != null:
+		slots(zone)[idx] = null
+		changed.emit()
+	return item
+
+
 ## Убирает расходник из слота и возвращает его (применяет вызывающий).
 func consume(zone: Zone, idx: int) -> ItemData:
 	var item := get_item(zone, idx)

@@ -58,6 +58,13 @@ func _tick(delta: float) -> void:
 			b.apply_central_force(dir * f * b.mass)
 			if d < core and not inverted:
 				b.absorb()
+		elif body is WorldArtifact:
+			var wa := body as WorldArtifact
+			if inverted:
+				wa.release(-dir * 260.0)  # Грави выталкивает артефакт с орбиты
+				wa.apply_central_force(dir * f * wa.mass)
+			else:
+				wa.capture(self, clampf(d, core * 3.0, rr * 0.45))
 
 
 func _draw() -> void:

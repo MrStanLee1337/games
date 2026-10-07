@@ -48,13 +48,16 @@ func _tick(delta: float) -> void:
 	var r := scale_factor()
 	match state:
 		State.IDLE:
-			if is_asleep() or not _has_provoker():
+			if is_asleep() or (not _has_provoker() and _world_artifacts().is_empty()):
 				return
 			for p in _players():
 				p.take_damage(dmg(damage))
 				p.apply_impulse(_launch_dir(p.global_position) * _strength(), 0.15)
 			for b in _bolts():
 				b.linear_velocity = _launch_dir(b.global_position) * _strength() * 0.8
+			for wa in _world_artifacts():
+				if not wa.is_orbiting():
+					wa.linear_velocity = _launch_dir(wa.global_position) * _strength() * 0.8
 			_reveal = 1.0
 			_set_state(State.COOLDOWN)
 		State.COOLDOWN:

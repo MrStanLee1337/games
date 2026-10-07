@@ -7,6 +7,7 @@ signal health_changed(hp: float, max_hp: float)
 signal died
 ## Короткое сообщение для HUD («Рюкзак полон» и т.п.).
 signal message(text: String)
+signal slot_selected(idx: int)
 
 @export_group("Тело")
 @export var body_size := Vector2(24, 40)
@@ -64,6 +65,8 @@ var regen_per_sec := 0.0
 
 var hp := 0.0
 var inventory := Inventory.new()
+## Выбранный слот пояса: его артефакт бросается клавишей G.
+var selected_slot := 0
 var facing := 1
 
 var _force_acc := Vector2.ZERO
@@ -81,6 +84,7 @@ var _invuln := 0.0
 var _dead := false
 var _stun := 0.0
 var _throw_cd := 0.0
+var _drop_cd := 0.0
 var _shake := 0.0
 var _look := 0.0
 var _camera: Camera2D
@@ -129,6 +133,11 @@ func _physics_process(delta: float) -> void:
 		_buffer = jump_buffer
 	if not stunned and Input.is_action_just_pressed(&"az_dash"):
 		_try_dash(dir)
+	for i in mini(3, inventory.belt.size()):
+		if Input.is_action_just_pressed(StringName("az_slot_%d" % (i + 1))):
+			select_slot(i)
+	if Input.is_action_just_pressed(&"az_drop"):
+		_try_drop()
 	if Input.is_action_just_pressed(&"az_throw"):
 		_try_throw()
 	if Input.is_action_just_pressed(&"az_interact"):
@@ -162,6 +171,7 @@ func _tick(delta: float) -> void:
 	_invuln -= delta
 	_stun -= delta
 	_throw_cd -= delta
+	_drop_cd -= delta
 	if _dash_t > 0.0:
 		_dash_t -= delta
 		if _dash_t <= 0.0:
@@ -221,18 +231,9 @@ func _try_dash(dir: float) -> void:
 
 
 func _try_interact() -> void:
-	var best: Pickup = null
-	var best_d := INF
-	for n in get_tree().get_nodes_in_group(&"pickups"):
-		var pk := n as Pickup
-		if pk == null or not pk.is_in_reach(global_position):
-			continue
-		var d := global_position.distance_to(pk.global_position)
-		if d < best_d:
-			best_d = d
-			best = pk
+	var best := Pickup.nearest_in_reach(get_tree(), global_position)
 	if best:
-		best.collect(self)
+		best.call(&"collect", self)
 
 
 ## Q: применить расходник, лучше всего подходящий под недостающее здоровье.
@@ -261,6 +262,39 @@ func use_item(zone: Inventory.Zone, idx: int) -> bool:
 	return true
 
 
+func select_slot(idx: int) -> void:
+	selected_slot = clampi(idx, 0, inventory.belt.size() - 1)
+	slot_selected.emit(selected_slot)
+
+
+## G — бросить артефакт из выбранного слота пояса; G с зажатым «вниз» — положить под ноги.
+func _try_drop() -> void:
+	if _drop_cd > 0.0:
+		return
+	var it := inventory.get_item(Inventory.Zone.BELT, selected_slot)
+	if it == null:
+		message.emit("Слот %d пуст" % (selected_slot + 1))
+		return
+	_drop_cd = 0.3
+	inventory.take(Inventory.Zone.BELT, selected_slot)
+	var wa := WorldArtifact.new()
+	wa.item = it
+	wa.aura_r = aura_radius
+	get_parent().add_child(wa)
+	if Input.is_action_pressed(&"az_down"):
+		wa.global_position = global_position + Vector2(facing * 16.0, 8.0)
+		message.emit("Положен: " + it.display_name)
+	else:
+		wa.global_position = global_position + Vector2(facing * 14.0, -10.0)
+		wa.linear_velocity = _throw_velocity()
+		message.emit("Брошен: " + it.display_name)
+
+
+func _throw_velocity() -> Vector2:
+	var up := throw_up + (throw_up_boost if Input.is_action_pressed(&"az_up") else 0.0)
+	return Vector2(facing * throw_speed + velocity.x * 0.4, -up)
+
+
 func _try_throw() -> void:
 	if _throw_cd > 0.0:
 		return
@@ -268,8 +302,7 @@ func _try_throw() -> void:
 	var b := Bolt.new()
 	get_parent().add_child(b)
 	b.global_position = global_position + Vector2(facing * 14.0, -10.0)
-	var up := throw_up + (throw_up_boost if Input.is_action_pressed(&"az_up") else 0.0)
-	b.linear_velocity = Vector2(facing * throw_speed + velocity.x * 0.4, -up)
+	b.linear_velocity = _throw_velocity()
 
 
 # --- API для внешних сил -------------------------------------------------

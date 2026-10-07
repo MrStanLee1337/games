@@ -8,7 +8,6 @@ extends Node2D
 var item: ItemData
 var _near := false
 var _t := 0.0
-var _player: Node2D
 
 
 func _ready() -> void:
@@ -19,9 +18,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
-	if _player == null:
-		_player = get_tree().get_first_node_in_group(&"player") as Node2D
-	_near = _player != null and is_in_reach(_player.global_position) and _is_nearest_to(_player.global_position)
+	_near = nearest_for_player(get_tree()) == self
 	queue_redraw()
 
 
@@ -29,15 +26,25 @@ func is_in_reach(from: Vector2) -> bool:
 	return from.distance_to(global_position + Vector2(0, -18)) <= interact_radius
 
 
-## Подсказку «E» показывает только ближайший к игроку предмет.
-func _is_nearest_to(from: Vector2) -> bool:
-	var mine := from.distance_to(global_position)
-	for n in get_tree().get_nodes_in_group(&"pickups"):
-		var other := n as Pickup
-		var d := from.distance_to(other.global_position)
-		if other != self and other.is_in_reach(from) and (d < mine or (is_equal_approx(d, mine) and other.get_instance_id() < get_instance_id())):
-			return false
-	return true
+## Ближайший к точке подбираемый предмет (Pickup или WorldArtifact) в пределах досягаемости.
+## Подсказку «E» рисует только он, и именно его подбирает игрок.
+static func nearest_in_reach(tree: SceneTree, from: Vector2) -> Node2D:
+	var best: Node2D = null
+	var best_d := INF
+	for n in tree.get_nodes_in_group(&"pickups"):
+		var node := n as Node2D
+		if node == null or node.is_queued_for_deletion() or not node.call(&"is_in_reach", from):
+			continue
+		var d := from.distance_to(node.global_position)
+		if d < best_d:
+			best_d = d
+			best = node
+	return best
+
+
+static func nearest_for_player(tree: SceneTree) -> Node2D:
+	var p := tree.get_first_node_in_group(&"player") as Node2D
+	return null if p == null else nearest_in_reach(tree, p.global_position)
 
 
 ## Пытается положить предмет игроку; true — предмет подобран.

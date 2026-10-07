@@ -39,7 +39,7 @@ var _last_scale := -1.0
 func _ready() -> void:
 	current_intensity = base_intensity
 	collision_layer = 0
-	collision_mask = 6  # игрок (2) и болты (4)
+	collision_mask = 14  # игрок (2), болты (4), брошенные артефакты (8)
 	monitorable = false
 	_rebuild()
 	if Engine.is_editor_hint():
@@ -153,9 +153,21 @@ func _bolts() -> Array[Bolt]:
 	return out
 
 
+func _world_artifacts() -> Array[WorldArtifact]:
+	var out: Array[WorldArtifact] = []
+	for b in _bodies:
+		if b is WorldArtifact:
+			out.append(b as WorldArtifact)
+	return out
+
+
 ## Игрок или болт внутри — «провокатор» для Жарки, Электры, Трамплина.
+## Брошенные артефакты аномалии не провоцируют.
 func _has_provoker() -> bool:
-	return not _bodies.is_empty()
+	for b in _bodies:
+		if b is Player or b is Bolt:
+			return true
+	return false
 
 
 func _physics_process(delta: float) -> void:

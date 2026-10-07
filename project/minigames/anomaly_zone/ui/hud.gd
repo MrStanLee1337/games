@@ -2,10 +2,11 @@ class_name ZoneHud
 extends Control
 ## HUD «Зоны». Пока: полоса HP, подсказка по клавишам (H), всплывающие сообщения.
 
-const HINTS := "A/D ← → — бег    Пробел/W — прыжок    Shift — рывок    F — болт    E — подобрать    Q — лечение\nTab — инвентарь    R — к чекпоинту    H — скрыть подсказку    F1 — отладка    F2 — артефакты    Esc — выход"
+const HINTS := "A/D ← → — бег    Пробел/W — прыжок    Shift — рывок    F — болт    E — подобрать    Q — лечение    1/2/3 — слот, G — бросить (S+G — положить)\nTab — инвентарь    R — к чекпоинту    H — скрыть подсказку    F1 — отладка    F2 — артефакты    Esc — выход"
 const SLOT := 44.0
 
 var _inv: Inventory
+var _selected := 0
 var _hp := 100.0
 var _max_hp := 100.0
 var _hints: Label
@@ -69,6 +70,11 @@ static func _fmt_time(t: float) -> String:
 	return "%d:%04.1f" % [floori(t / 60.0), fmod(t, 60.0)]
 
 
+func set_selected(idx: int) -> void:
+	_selected = idx
+	queue_redraw()
+
+
 func set_health(hp: float, max_hp: float) -> void:
 	_hp = hp
 	_max_hp = max_hp
@@ -111,7 +117,11 @@ func _draw_belt() -> void:
 	for i in _inv.belt.size():
 		var r := Rect2(Vector2(24.0 + i * (SLOT + 8.0), 52.0), Vector2(SLOT, SLOT))
 		draw_rect(r, Color(0, 0, 0, 0.5))
-		draw_rect(r, Color(1, 1, 1, 0.25), false, 2.0)
+		if i == _selected:
+			draw_rect(r, Color("f2c14e"), false, 2.5)
+		else:
+			draw_rect(r, Color(1, 1, 1, 0.25), false, 2.0)
+		draw_string(font, r.position + Vector2(3.0, 12.0), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.5))
 		var it := _inv.belt[i]
 		if it:
 			it.draw_icon(self, r.get_center(), SLOT * 0.55)
