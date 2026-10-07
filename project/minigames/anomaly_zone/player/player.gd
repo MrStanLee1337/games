@@ -85,6 +85,8 @@ var _dead := false
 var _stun := 0.0
 var _throw_cd := 0.0
 var _drop_cd := 0.0
+var _fall_through: Platform = null
+var _fall_through_t := 0.0
 var _shake := 0.0
 var _look := 0.0
 var _camera: Camera2D
@@ -130,7 +132,11 @@ func _physics_process(delta: float) -> void:
 		_coyote = coyote_time
 		_air_dash_used = false
 	if not stunned and Input.is_action_just_pressed(&"az_jump"):
-		_buffer = jump_buffer
+		var plat := _floor_platform() if Input.is_action_pressed(&"az_down") else null
+		if plat and plat.one_way:
+			_drop_through(plat)  # вниз + прыжок на односторонней платформе — спрыгнуть
+		else:
+			_buffer = jump_buffer
 	if not stunned and Input.is_action_just_pressed(&"az_dash"):
 		_try_dash(dir)
 	for i in mini(3, inventory.belt.size()):
@@ -172,6 +178,11 @@ func _tick(delta: float) -> void:
 	_stun -= delta
 	_throw_cd -= delta
 	_drop_cd -= delta
+	if _fall_through_t > 0.0:
+		_fall_through_t -= delta
+		if _fall_through_t <= 0.0 and is_instance_valid(_fall_through):
+			remove_collision_exception_with(_fall_through)
+			_fall_through = null
 	if _dash_t > 0.0:
 		_dash_t -= delta
 		if _dash_t <= 0.0:
@@ -260,6 +271,29 @@ func use_item(zone: Inventory.Zone, idx: int) -> bool:
 	heal(it.heal)
 	message.emit("%s: +%d HP" % [it.display_name, int(it.heal)])
 	return true
+
+
+## Платформа, на которой стоит игрок (null — не стоит или это не Platform).
+func _floor_platform() -> Platform:
+	if not is_on_floor():
+		return null
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		if c.get_normal().y < -0.7 and c.get_collider() is Platform:
+			return c.get_collider() as Platform
+	return null
+
+
+## На короткое время отключаем столкновение с платформой — игрок проваливается сквозь неё.
+func _drop_through(plat: Platform) -> void:
+	if is_instance_valid(_fall_through):
+		remove_collision_exception_with(_fall_through)
+	_fall_through = plat
+	_fall_through_t = 0.25
+	add_collision_exception_with(plat)
+	position.y += 2.0
+	_coyote = 0.0
+	_buffer = 0.0
 
 
 func select_slot(idx: int) -> void:
