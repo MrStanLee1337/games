@@ -61,7 +61,9 @@ func _reset_extra() -> void:
 
 
 func _tick(delta: float) -> void:
-	fire = move_toward(fire, 0.0 if is_asleep() else _fire_target, 1.5 * delta)
+	var want := 0.0 if is_asleep() else _fire_target
+	# Смерч раскручивается быстро, а стихает медленно — огонь висит и между вспышками Жарки.
+	fire = move_toward(fire, want, (4.0 if want > fire else 0.5) * delta)
 	if is_asleep():
 		return
 	if fire > 0.01:

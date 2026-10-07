@@ -16,7 +16,7 @@ extends Anomaly
 @export var periodic := false
 @export var period := 3.0
 ## Форма «пар» (Капля): столб не жжёт, а поднимает. Сила подъёма и предельная скорость.
-@export var steam_lift := 2600.0
+@export var steam_lift := 1100.0
 @export var steam_rise_speed := 320.0
 
 var _hit_t := 0.0
@@ -182,8 +182,14 @@ func _steam_tick() -> void:
 		return
 	var lift := steam_lift * current_intensity
 	for p in _players():
-		if p.velocity.y > -steam_rise_speed * current_intensity:
-			p.add_external_force(Vector2(0.0, -lift))
+		# Компенсируем гравитацию (и при падении тоже) и добавляем подъём — игрок держится у верха.
+		var g := p.gravity * p.gravity_multiplier * (p.fall_gravity_mult if p.velocity.y > 0.0 else 1.0)
+		var extra := 0.0
+		if p.velocity.y > 0.0:
+			extra = lift * 2.5  # падает обратно в столб — тормозим резко, чтобы держался у верха
+		elif p.velocity.y > -steam_rise_speed * current_intensity:
+			extra = lift
+		p.add_external_force(Vector2(0.0, -(g + extra)))
 	for b in _bolts():
 		b.apply_central_force(Vector2(0.0, -lift * b.mass))
 
