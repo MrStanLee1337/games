@@ -55,6 +55,7 @@ func _ready() -> void:
 	hud.set_inventory(player.inventory)
 	player.message.connect(hud.show_message)
 	player.slot_selected.connect(hud.set_selected)
+	player.charge_changed.connect(hud.set_charge)
 	player.inventory.item_added.connect(_on_item_added)
 
 	level.finish_sign.reached.connect(_on_finish)

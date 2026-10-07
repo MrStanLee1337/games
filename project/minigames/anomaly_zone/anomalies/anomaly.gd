@@ -26,6 +26,8 @@ var inverted := false
 var mod_mult := 1.0
 ## Отдельный множитель урона (артефакт может обнулить урон, не трогая остальное).
 var damage_mult := 1.0
+## Качественное превращение от артефакта (&"" — обычная аномалия). Смысл задаёт наследник.
+var form: StringName = &""
 var state: State = State.IDLE
 
 var _state_t := 0.0
@@ -51,10 +53,11 @@ func _ready() -> void:
 
 # --- Публичный интерфейс для пояса артефактов ------------------------------
 
-func set_modifier(mult: float, inv: bool, dmg: float = 1.0) -> void:
+func set_modifier(mult: float, inv: bool, dmg: float = 1.0, new_form: StringName = &"") -> void:
 	mod_mult = mult
 	inverted = inv
 	damage_mult = dmg
+	form = new_form
 
 
 func clear_modifier() -> void:

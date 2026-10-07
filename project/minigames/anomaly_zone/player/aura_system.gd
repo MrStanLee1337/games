@@ -47,6 +47,7 @@ func refresh() -> void:
 		var mult := 1.0
 		var inv := false
 		var dmg := 1.0
+		var new_form: StringName = &""
 		var links: Array[Dictionary] = []
 		for s in sources:
 			var items: Array[ItemData] = s.call(&"aura_items")
@@ -66,12 +67,14 @@ func refresh() -> void:
 					if e.get("inverted", false):
 						inv = not inv  # две инверсии гасят друг друга
 					dmg *= e.get("damage_mult", 1.0)
+					if e.has("form"):
+						new_form = e["form"]
 				if hit:
 					links.append({"source": s, "color": art.color})
 		if links.is_empty():
 			a.clear_modifier()
 			continue
-		a.set_modifier(mult, inv, dmg)
+		a.set_modifier(mult, inv, dmg, new_form)
 		var trend := 0
 		if mult > 1.001:
 			trend = 1
@@ -81,7 +84,7 @@ func refresh() -> void:
 			trend = -1
 		elif dmg > 1.001:
 			trend = 1
-		_info[a] = {"links": links, "trend": trend, "inverted": inv}
+		_info[a] = {"links": links, "trend": trend, "inverted": inv, "form": new_form}
 
 
 ## Круг ауры источника — общий вид для пояса и брошенных артефактов.
@@ -113,18 +116,31 @@ func _draw() -> void:
 			var col: Color = link["color"]
 			draw_line(origin + off, target + off, Color(col, 0.6), 1.5)
 			draw_circle(target + off, 3.0, Color(col, 0.8))
-		_draw_marks(a.top_point(), info["trend"], info["inverted"])
+		_draw_marks(a.top_point(), info["trend"], info["inverted"], info["form"] != &"")
 
 
-## Над аномалией: ▲ — разгорается, ▼ — затухает; пара ▲▼ — сила инвертирована.
-func _draw_marks(p: Vector2, trend: int, inverted: bool) -> void:
+## Над аномалией: ▲ — разгорается, ▼ — затухает; пара ▲▼ — сила инвертирована;
+## четырёхлучевая звезда — аномалия превращена во что-то другое (form).
+func _draw_marks(p: Vector2, trend: int, inverted: bool, formed: bool) -> void:
 	var pos := p + Vector2(0.0, sin(_t * 5.0) * 1.5)
+	if formed:
+		_star(pos, 8.0 + sin(_t * 4.0))
+		pos += Vector2(0.0, -18.0)
 	if inverted:
 		_arrow(pos + Vector2(-7.0, 0.0), true, Color("e8ecf4"), 5.0)
 		_arrow(pos + Vector2(7.0, 0.0), false, Color("e8ecf4"), 5.0)
 		pos += Vector2(0.0, -14.0)
 	if trend != 0:
 		_arrow(pos, trend > 0, UP_COLOR if trend > 0 else DOWN_COLOR, 8.0)
+
+
+func _star(c: Vector2, s: float) -> void:
+	var pts := PackedVector2Array()
+	for i in 8:
+		var r := s if i % 2 == 0 else s * 0.35
+		pts.append(c + Vector2.from_angle(i * TAU / 8.0 - PI / 2.0) * r)
+	draw_colored_polygon(pts, Color("f5f0ff"))
+	draw_polyline(pts + PackedVector2Array([pts[0]]), Color(0, 0, 0, 0.5), 1.0)
 
 
 func _arrow(c: Vector2, up: bool, col: Color, s: float) -> void:

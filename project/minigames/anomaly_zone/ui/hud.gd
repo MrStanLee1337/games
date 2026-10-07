@@ -7,6 +7,8 @@ const SLOT := 44.0
 
 var _inv: Inventory
 var _selected := 0
+var _charge := 0
+var _max_charge := 3
 var _hp := 100.0
 var _max_hp := 100.0
 var _hints: Label
@@ -70,6 +72,12 @@ static func _fmt_time(t: float) -> String:
 	return "%d:%04.1f" % [floori(t / 60.0), fmod(t, 60.0)]
 
 
+func set_charge(value: int, max_value: int) -> void:
+	_charge = value
+	_max_charge = max_value
+	queue_redraw()
+
+
 func set_selected(idx: int) -> void:
 	_selected = idx
 	queue_redraw()
@@ -125,6 +133,15 @@ func _draw_belt() -> void:
 		var it := _inv.belt[i]
 		if it:
 			it.draw_icon(self, r.get_center(), SLOT * 0.55)
+	# Заряд Батарейки: деления справа от пояса.
+	if _charge > 0:
+		var x0 := 24.0 + _inv.belt.size() * (SLOT + 8.0) + 4.0
+		for i in _max_charge:
+			var cr := Rect2(Vector2(x0 + i * 14.0, 58.0), Vector2(10.0, 32.0))
+			draw_rect(cr, Color(0, 0, 0, 0.5))
+			if i < _charge:
+				draw_rect(cr.grow(-2.0), Color("ffe46b"))
+		draw_string(font, Vector2(x0, 52.0 + SLOT + 20.0), "заряд: Shift", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("ffe46b"))
 	var n := _inv.count_consumables()
 	if n > 0:
 		draw_string(font, Vector2(24.0, 52.0 + SLOT + 20.0), "Q — лечение (%d)" % n, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.7))

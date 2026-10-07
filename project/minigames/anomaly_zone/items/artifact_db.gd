@@ -6,7 +6,8 @@ extends RefCounted
 ##   id, name, desc, color, shape
 ##   effects:  [{type, mult, inverted, damage_mult}]  — как артефакт меняет аномалии в ауре.
 ##             mult — множитель интенсивности (по умолчанию 1), inverted — инверсия силы,
-##             damage_mult — отдельный множитель урона (по умолчанию 1).
+##             damage_mult — отдельный множитель урона (по умолчанию 1),
+##             form — качественное превращение аномалии (см. FORM_NAMES), а не просто множитель.
 ##   passives: {jump_mult, gravity_mult, regen} — пассивные эффекты игроку.
 ## Расходник: id, name, desc, color, shape, heal.
 
@@ -18,22 +19,31 @@ const ANOMALY_NAMES := {
 	Anomaly.Type.KHOLODETS: "Холодец",
 }
 
+## Качественные превращения аномалий: аномалия получает form и меняет поведение и вид.
+const FORM_NAMES := {
+	&"steam": "столб пара — поднимает вверх",
+	&"battery": "разряды копятся в заряд",
+	&"jelly": "желе — пружинит",
+	&"float": "поле парения",
+}
+
 const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id": &"kaplya", "name": "Капля",
-		"desc": "Холодная капля. Гасит огонь, но вода хорошо проводит ток.",
+		"desc": "Холодная капля. Огонь рядом с ней превращается в пар, но вода хорошо проводит ток.",
 		"color": Color("5aa9ef"), "shape": ItemData.Shape.DROP,
 		"effects": [
-			{"type": Anomaly.Type.ZHARKA, "mult": 0.1},
+			{"type": Anomaly.Type.ZHARKA, "form": &"steam"},
 			{"type": Anomaly.Type.ELECTRA, "mult": 1.6},
 		],
 	},
 	{
 		"id": &"batareyka", "name": "Батарейка",
-		"desc": "Поглощает разряды: Электры рядом не бьют.",
+		"desc": "Забирает разряды Электр в заряд. Shift с зарядом — усиленный рывок.
+Четвёртый заряд — перегрузка.",
 		"color": Color("f2c14e"), "shape": ItemData.Shape.SQUARE,
 		"effects": [
-			{"type": Anomaly.Type.ELECTRA, "mult": 0.0},
+			{"type": Anomaly.Type.ELECTRA, "form": &"battery"},
 		],
 	},
 	{
@@ -47,20 +57,20 @@ const ARTIFACTS: Array[Dictionary] = [
 	},
 	{
 		"id": &"gravi", "name": "Грави",
-		"desc": "Выворачивает притяжение наизнанку, но глушит трамплины.",
+		"desc": "Выворачивает притяжение наизнанку, а трамплины превращает в поле парения.",
 		"color": Color("a066ff"), "shape": ItemData.Shape.CIRCLE,
 		"effects": [
 			{"type": Anomaly.Type.VORONKA, "inverted": true},
-			{"type": Anomaly.Type.TRAMPLIN, "mult": 0.3},
+			{"type": Anomaly.Type.TRAMPLIN, "form": &"float"},
 		],
 		"passives": {"gravity_mult": 0.85},
 	},
 	{
 		"id": &"meduza", "name": "Медуза",
-		"desc": "Холодец перестаёт жечь, хотя всё ещё липнет.",
+		"desc": "Холодец застывает в упругое желе: не жжёт и не липнет, а пружинит.",
 		"color": Color("ff7ad9"), "shape": ItemData.Shape.HEXAGON,
 		"effects": [
-			{"type": Anomaly.Type.KHOLODETS, "damage_mult": 0.0},
+			{"type": Anomaly.Type.KHOLODETS, "form": &"jelly"},
 		],
 		"passives": {"regen": 1.0},
 	},
@@ -114,6 +124,8 @@ static func describe(item: ItemData) -> Array[String]:
 	for e in item.effects:
 		var parts: Array[String] = []
 		var mult: float = e.get("mult", 1.0)
+		if e.has("form"):
+			parts.append(FORM_NAMES.get(e["form"], String(e["form"])))
 		if e.get("inverted", false):
 			parts.append("инверсия")
 		if not is_equal_approx(mult, 1.0):

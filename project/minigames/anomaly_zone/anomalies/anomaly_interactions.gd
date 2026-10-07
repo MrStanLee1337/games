@@ -73,7 +73,7 @@ func _update(dt: float) -> void:
 			continue
 		var reach: float = heat["reach"] * z.current_intensity
 		for k in pools:
-			if k.dried or Anomaly.rect_gap(z.world_bounds(), k.world_bounds()) > reach:
+			if k.dried or k.form == &"jelly" or Anomaly.rect_gap(z.world_bounds(), k.world_bounds()) > reach:
 				continue
 			k.add_dryness(heat["rate"] * z.current_intensity * dt)
 			_links.append({"a": z, "b": k, "color": heat["color"]})
@@ -81,10 +81,10 @@ func _update(dt: float) -> void:
 	# Ток: Электра касается лужи (сам разряд — в on_discharge).
 	var current: Dictionary = RULES[&"current"]
 	for e in electras:
-		if e.is_asleep():
+		if e.is_asleep() or e.form == &"battery":
 			continue
 		for k in pools:
-			if not k.is_asleep() and Anomaly.rect_gap(e.world_bounds(), k.world_bounds()) <= current["reach"]:
+			if not k.is_asleep() and k.form != &"jelly" and Anomaly.rect_gap(e.world_bounds(), k.world_bounds()) <= current["reach"]:
 				_links.append({"a": e, "b": k, "color": Color(current["color"], 0.5)})
 
 	# Тяга: Воронка затягивает пламя Жарки.
@@ -111,6 +111,8 @@ func _update(dt: float) -> void:
 
 ## Электра разрядилась: если она касается лужи, ток проходит по всей луже.
 func on_discharge(e: Electra) -> void:
+	if e.form == &"battery":
+		return  # разряд ушёл в Батарейку
 	var current: Dictionary = RULES[&"current"]
 	for n in get_tree().get_nodes_in_group(&"anomalies"):
 		var k := n as Kholodets

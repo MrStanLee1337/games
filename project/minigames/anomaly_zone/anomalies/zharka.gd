@@ -15,12 +15,16 @@ extends Anomaly
 ## Периодический режим: вспыхивает сама, без провокации.
 @export var periodic := false
 @export var period := 3.0
+## Форма «пар» (Капля): столб не жжёт, а поднимает. Сила подъёма и предельная скорость.
+@export var steam_lift := 2600.0
+@export var steam_rise_speed := 320.0
 
 var _hit_t := 0.0
 ## Смещение пламени по x: Воронка рядом затягивает огонь к себе (AnomalyInteractions).
 var flame_offset := 0.0
 var _flame_target := 0.0
 var _particles: CPUParticles2D
+var _steam: CPUParticles2D
 
 
 func _init() -> void:
@@ -45,6 +49,22 @@ func _ready() -> void:
 	grad.colors = PackedColorArray([Color("ffd36b"), Color(1.0, 0.4, 0.1, 0.0)])
 	_particles.color_ramp = grad
 	add_child(_particles)
+	_steam = CPUParticles2D.new()
+	_steam.emitting = false
+	_steam.amount = 14
+	_steam.lifetime = 1.4
+	_steam.direction = Vector2.UP
+	_steam.spread = 8.0
+	_steam.gravity = Vector2(0.0, -40.0)
+	_steam.initial_velocity_min = 70.0
+	_steam.initial_velocity_max = 120.0
+	_steam.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	_steam.scale_amount_min = 3.0
+	_steam.scale_amount_max = 7.0
+	var sg := Gradient.new()
+	sg.colors = PackedColorArray([Color(1, 1, 1, 0.55), Color(1, 1, 1, 0.0)])
+	_steam.color_ramp = sg
+	add_child(_steam)
 
 
 func _new_shape() -> Shape2D:
@@ -118,6 +138,13 @@ func _tick(delta: float) -> void:
 		if _particles:
 			_particles.gravity = Vector2(flame_offset * 4.0, 0.0)
 			_particles.position.x = flame_offset * 0.4
+	if _steam:
+		_steam.emitting = form == &"steam" and not is_asleep()
+		_steam.emission_rect_extents = Vector2(size.x * r * 0.4, 4.0)
+		_steam.position = Vector2(0.0, -6.0)
+	if form == &"steam":
+		_steam_tick()
+		return
 	match state:
 		State.IDLE:
 			if is_asleep():
@@ -147,6 +174,20 @@ func _tick(delta: float) -> void:
 				_set_state(State.IDLE)
 
 
+## Пар: огонь гаснет, столб тянет вверх всех, кто внутри (подъёмник).
+func _steam_tick() -> void:
+	if state != State.IDLE:
+		_set_state(State.IDLE)
+	if is_asleep():
+		return
+	var lift := steam_lift * current_intensity
+	for p in _players():
+		if p.velocity.y > -steam_rise_speed * current_intensity:
+			p.add_external_force(Vector2(0.0, -lift))
+	for b in _bolts():
+		b.apply_central_force(Vector2(0.0, -lift * b.mass))
+
+
 func _draw() -> void:
 	var k := scale_factor()
 	var w := size.x * k
@@ -156,6 +197,14 @@ func _draw() -> void:
 	var live := not Engine.is_editor_hint()
 	if live and is_asleep():
 		draw_rect(r, Color(0.7, 0.7, 0.7, 0.05 + 0.03 * sin(_phase * 2.0)))
+		return
+	if live and form == &"steam":
+		draw_rect(r, Color(0.9, 0.95, 1.0, 0.10))
+		draw_rect(r, Color(0.9, 0.95, 1.0, 0.35), false, 1.5)
+		for i in 6:
+			var py := -fposmod(_phase * 60.0 + i * h / 6.0, h)
+			var px := sin(_phase * 2.0 + i * 1.7) * w * 0.25
+			draw_circle(Vector2(px, py), 5.0 + 3.0 * (1.0 + py / h), Color(1, 1, 1, 0.12 + 0.2 * (1.0 + py / h)))
 		return
 	match state if live else State.IDLE:
 		State.TELEGRAPH:

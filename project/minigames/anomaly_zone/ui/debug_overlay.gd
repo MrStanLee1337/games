@@ -29,8 +29,9 @@ func _draw() -> void:
 		var p := a.top_point() + Vector2(-70.0, -46.0)
 		var title := String(ArtifactDb.ANOMALY_NAMES[a.anomaly_type])
 		_text(font, p, "%s  I=%.2f (база %.2f)" % [title, a.current_intensity, a.base_intensity])
-		_text(font, p + Vector2(0.0, 15.0), "мод ×%.2f%s  урон ×%.2f  [%s]" % [
-			a.mod_mult, " инв" if a.inverted else "", a.damage_mult, STATE_NAMES[a.state]])
+		_text(font, p + Vector2(0.0, 15.0), "мод ×%.2f%s  урон ×%.2f  [%s]%s" % [
+			a.mod_mult, " инв" if a.inverted else "", a.damage_mult, STATE_NAMES[a.state],
+			"  форма: " + String(a.form) if a.form != &"" else ""])
 		var extra := a.debug_extra()
 		if extra != "":
 			_text(font, p + Vector2(0.0, 30.0), extra)

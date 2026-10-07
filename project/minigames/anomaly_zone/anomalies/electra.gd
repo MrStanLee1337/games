@@ -16,6 +16,9 @@ extends Anomaly
 
 var _zigzags: Array[PackedVector2Array] = []
 var _regen_t := 0.0
+## Куда ушёл разряд в Батарейку (для вспышки) и сколько ещё её рисовать.
+var _charge_to := Vector2.ZERO
+var _charge_t := 0.0
 
 
 func _init() -> void:
@@ -38,6 +41,10 @@ func _on_state(s: State) -> void:
 	if s != State.ACTIVE:
 		return
 	var center := global_position
+	if form == &"battery":
+		_discharge_into_battery()
+		_regen_bolts(7)
+		return
 	for p in _players():
 		var away := (p.global_position - center).normalized()
 		if away == Vector2.ZERO:
@@ -53,8 +60,19 @@ func _on_state(s: State) -> void:
 	_regen_bolts(7)
 
 
+## Форма «батарейка»: разряд никого не бьёт, а уходит в Батарейку на поясе игрока
+## (если пояс достаёт до Электры); брошенная Батарейка просто поглощает разряд.
+func _discharge_into_battery() -> void:
+	var p := get_tree().get_first_node_in_group(&"player") as Player
+	if p and p.has_belt_artifact(&"batareyka") and edge_distance(p.global_position) <= p.aura_radius:
+		p.absorb_discharge()
+		_charge_to = p.global_position
+		_charge_t = 0.3
+
+
 func _tick(delta: float) -> void:
 	var r := scale_factor()
+	_charge_t -= delta
 	_regen_t -= delta
 	match state:
 		State.IDLE:
@@ -116,3 +134,14 @@ func _draw() -> void:
 	var col := tint(Color("e8fbff", 0.95) if state == State.ACTIVE else Color(cyan, 0.8))
 	for pts in _zigzags:
 		draw_polyline(pts, col, 2.0 if state == State.ACTIVE else 1.5)
+	if form == &"battery":
+		draw_arc(Vector2.ZERO, rr + 4.0, 0.0, TAU, 40, Color("ffe46b", 0.6), 1.5)
+		if _charge_t > 0.0:
+			var to := to_local(_charge_to)
+			var pts := PackedVector2Array()
+			for i in 9:
+				var q := Vector2.ZERO.lerp(to, i / 8.0)
+				if i > 0 and i < 8:
+					q += Vector2(randf_range(-7.0, 7.0), randf_range(-7.0, 7.0))
+				pts.append(q)
+			draw_polyline(pts, Color("ffe46b"), 2.0)

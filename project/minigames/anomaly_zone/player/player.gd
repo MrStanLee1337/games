@@ -8,6 +8,7 @@ signal died
 ## Короткое сообщение для HUD («Рюкзак полон» и т.п.).
 signal message(text: String)
 signal slot_selected(idx: int)
+signal charge_changed(value: int, max_value: int)
 
 @export_group("Тело")
 @export var body_size := Vector2(24, 40)
@@ -49,6 +50,13 @@ signal slot_selected(idx: int)
 @export_group("Инвентарь")
 @export var belt_slots := 3
 
+@export_group("Заряд (Батарейка)")
+@export var max_charge := 3
+## Усиленный рывок: множители скорости и длительности.
+@export var charged_dash_speed := 1.6
+@export var charged_dash_time := 1.3
+@export var overload_damage := 25.0
+
 @export_group("Аура артефактов")
 @export var aura_radius := 160.0
 
@@ -71,6 +79,11 @@ var facing := 1
 
 var _force_acc := Vector2.ZERO
 var _mult_acc := 1.0
+var _jump_boost_acc := 1.0
+var _charged_dash := false
+## Скорость падения в момент приземления (держится один кадр) — для желе.
+var landing_speed := 0.0
+var charge := 0
 var _coyote := 0.0
 var _buffer := 0.0
 var _jumping := false
@@ -120,6 +133,8 @@ func _physics_process(delta: float) -> void:
 	# Силы и замедление, собранные за прошлый кадр, — порядок обработки узлов не важен.
 	var ext := _force_acc
 	var slow := _mult_acc
+	var boost := _jump_boost_acc
+	_jump_boost_acc = 1.0
 	_force_acc = Vector2.ZERO
 	_mult_acc = 1.0
 	_tick(delta)
@@ -152,11 +167,16 @@ func _physics_process(delta: float) -> void:
 		use_best_consumable()
 
 	if _dash_t > 0.0:
-		velocity = Vector2(_dash_dir * dash_speed, 0.0)
+		velocity = Vector2(_dash_dir * dash_speed * (charged_dash_speed if _charged_dash else 1.0), 0.0)
 	else:
-		_move(delta, dir, slow, ext != Vector2.ZERO)
+		_move(delta, dir, slow, ext != Vector2.ZERO, boost)
 	velocity += ext * delta
+	var was_on_floor := is_on_floor()
+	var fall_speed := velocity.y
+	landing_speed = 0.0
 	move_and_slide()
+	if not was_on_floor and is_on_floor():
+		landing_speed = maxf(0.0, fall_speed)
 
 
 func _process(delta: float) -> void:
@@ -191,7 +211,7 @@ func _tick(delta: float) -> void:
 		_set_hp(minf(max_hp, hp + regen_per_sec * delta))
 
 
-func _move(delta: float, dir: float, slow: float, pulled: bool) -> void:
+func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) -> void:
 	# Пока действует блокировка управления, ввод почти не влияет — отброс не гасится.
 	var ctl := 1.0
 	if _lock > 0.0:
@@ -214,7 +234,7 @@ func _move(delta: float, dir: float, slow: float, pulled: bool) -> void:
 	velocity.y = minf(velocity.y + g * delta, max_fall_speed)
 
 	if _buffer > 0.0 and _coyote > 0.0:
-		velocity.y = -jump_velocity * jump_multiplier
+		velocity.y = -jump_velocity * jump_multiplier * boost
 		_buffer = 0.0
 		_coyote = 0.0
 		_jumping = true
@@ -235,7 +255,10 @@ func _try_dash(dir: float) -> void:
 		_air_dash_used = true
 	_dash_dir = int(signf(dir)) if dir != 0.0 else facing
 	facing = _dash_dir
-	_dash_t = dash_time
+	_charged_dash = charge > 0
+	if _charged_dash:
+		_set_charge(charge - 1)
+	_dash_t = dash_time * (charged_dash_time if _charged_dash else 1.0)
 	_dash_cd = dash_cooldown
 	_jumping = false
 	velocity.y = 0.0
@@ -359,6 +382,34 @@ func add_external_force(f: Vector2) -> void:
 	_force_acc += f
 
 
+## Временная добавка к прыжку (желе). Вызывать каждый кадр; берётся максимум.
+func set_jump_boost(m: float) -> void:
+	_jump_boost_acc = maxf(_jump_boost_acc, m)
+
+
+## Разряд Электры ушёл в Батарейку на поясе. Перегрузка — удар по самому игроку.
+func absorb_discharge() -> void:
+	if charge >= max_charge:
+		_set_charge(0)
+		message.emit("Перегрузка Батарейки!")
+		take_damage(overload_damage, Vector2(-facing, -1.0), true)
+		stun(0.5)
+	else:
+		_set_charge(charge + 1)
+
+
+func has_belt_artifact(id: StringName) -> bool:
+	for it in inventory.belt_artifacts():
+		if it.id == id:
+			return true
+	return false
+
+
+func _set_charge(v: int) -> void:
+	charge = v
+	charge_changed.emit(charge, max_charge)
+
+
 ## Замедление. Вызывать каждый физический кадр; из нескольких источников берётся минимум.
 func set_move_multiplier(m: float) -> void:
 	_mult_acc = minf(_mult_acc, m)
@@ -437,7 +488,9 @@ func _set_hp(v: float) -> void:
 
 
 func _draw() -> void:
-	var col := Color("8fd3ff") if _dash_t > 0.0 else Color("dfe3ee")
+	var col := Color("dfe3ee")
+	if _dash_t > 0.0:
+		col = Color("ffe46b") if _charged_dash else Color("8fd3ff")
 	var half := body_size * 0.5
 	draw_rect(Rect2(-half, body_size), col)
 	var eye_x := half.x - 12.0 if facing > 0 else -half.x + 2.0
