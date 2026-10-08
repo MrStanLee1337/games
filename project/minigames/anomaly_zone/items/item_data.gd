@@ -3,7 +3,7 @@ extends Resource
 ## Описание предмета. Иконки рисуются примитивами по shape и color.
 
 enum Kind { ARTIFACT, CONSUMABLE }
-enum Shape { CIRCLE, DIAMOND, TRIANGLE, SQUARE, HEXAGON, DROP, CROSS, BAR }
+enum Shape { CIRCLE, DIAMOND, TRIANGLE, SQUARE, HEXAGON, DROP, CROSS, BAR, BOLT }
 
 @export var id: StringName = &""
 @export var display_name := ""
@@ -50,6 +50,9 @@ func draw_icon(ci: CanvasItem, c: Vector2, size: float) -> void:
 			ci.draw_rect(Rect2(c - Vector2(r, r) * 0.9, Vector2(r, r) * 1.8), Color("e8ecf4"))
 			ci.draw_rect(Rect2(c + Vector2(-r * 0.2, -r * 0.65), Vector2(r * 0.4, r * 1.3)), color)
 			ci.draw_rect(Rect2(c + Vector2(-r * 0.65, -r * 0.2), Vector2(r * 1.3, r * 0.4)), color)
+		Shape.BOLT:
+			ci.draw_colored_polygon(_poly(c, [Vector2(r * 0.15, -r), Vector2(-r * 0.6, r * 0.1), Vector2(-r * 0.05, r * 0.1),
+				Vector2(-r * 0.2, r), Vector2(r * 0.6, -r * 0.15), Vector2(r * 0.05, -r * 0.15)]), color)
 		Shape.BAR:
 			ci.draw_rect(Rect2(c + Vector2(-r, -r * 0.45), Vector2(r * 2.0, r * 0.9)), Color("e8ecf4"))
 			for k in 3:

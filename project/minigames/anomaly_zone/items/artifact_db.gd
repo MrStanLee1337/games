@@ -8,7 +8,9 @@ extends RefCounted
 ##             mult — множитель интенсивности (по умолчанию 1), inverted — инверсия силы,
 ##             damage_mult — отдельный множитель урона (по умолчанию 1),
 ##             form — качественное превращение аномалии (см. FORM_NAMES), а не просто множитель.
-##   passives: {jump_mult, gravity_mult, regen} — пассивные эффекты игроку.
+##   passives: {jump_mult, gravity_mult, regen, grants_dash} — пассивные эффекты игроку.
+##             jump_mult — множитель высоты прыжка; gravity_mult — гравитации при той же высоте
+##             (прыжок дольше и дальше); grants_dash — даёт рывок (Shift).
 ## Расходник: id, name, desc, color, shape, heal.
 
 const ANOMALY_NAMES := {
@@ -53,7 +55,7 @@ const ARTIFACTS: Array[Dictionary] = [
 		"effects": [
 			{"type": Anomaly.Type.TRAMPLIN, "mult": 2.0},
 		],
-		"passives": {"jump_mult": 1.1},
+		"passives": {"jump_mult": 1.3},
 	},
 	{
 		"id": &"gravi", "name": "Грави",
@@ -63,7 +65,16 @@ const ARTIFACTS: Array[Dictionary] = [
 			{"type": Anomaly.Type.VORONKA, "inverted": true},
 			{"type": Anomaly.Type.TRAMPLIN, "form": &"float"},
 		],
-		"passives": {"gravity_mult": 0.85},
+		"passives": {"gravity_mult": 0.75},
+	},
+	{
+		"id": &"vspyshka", "name": "Вспышка",
+		"desc": "Рождается в Электре. Даёт рывок (Shift), но Электры рядом злее.",
+		"color": Color("8fd3ff"), "shape": ItemData.Shape.BOLT,
+		"effects": [
+			{"type": Anomaly.Type.ELECTRA, "mult": 1.4},
+		],
+		"passives": {"grants_dash": true},
 	},
 	{
 		"id": &"meduza", "name": "Медуза",
@@ -136,10 +147,12 @@ static func describe(item: ItemData) -> Array[String]:
 		lines.append("%s: %s" % [ANOMALY_NAMES[e["type"]], ", ".join(parts)])
 	var jm: float = item.passives.get("jump_mult", 1.0)
 	if not is_equal_approx(jm, 1.0):
-		lines.append("Прыжок %+d%%" % roundi((jm - 1.0) * 100.0))
+		lines.append("Высота прыжка ×%s" % _num(jm))
 	var gm: float = item.passives.get("gravity_mult", 1.0)
 	if not is_equal_approx(gm, 1.0):
 		lines.append("Гравитация ×%s" % _num(gm))
+	if item.passives.get("grants_dash", false):
+		lines.append("Рывок (Shift)")
 	var rg: float = item.passives.get("regen", 0.0)
 	if rg > 0.0:
 		lines.append("Регенерация %s HP/с" % _num(rg))

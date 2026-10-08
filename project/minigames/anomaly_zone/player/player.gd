@@ -47,6 +47,8 @@ const STATE_NAMES := ["стоит", "бег", "прыжок", "падение", 
 var jump_multiplier := 1.0
 var gravity_multiplier := 1.0
 var regen_per_sec := 0.0
+## Рывок даёт только артефакт Вспышка (или заряд Батарейки — один рывок за заряд).
+var has_dash := false
 
 ## Эффективные параметры движения: копия config с учётом пассивов. Только для чтения.
 var m: MovementConfig
@@ -73,6 +75,8 @@ var charge := 0
 var _coyote := 0.0
 var _buffer := 0.0
 var _jumping := false
+## Окно «вершины» (меньше гравитации) — только у вершины своего прыжка, не после рывка или толчка.
+var _apex_ok := false
 var _air_dash_used := false
 var _dash_t := 0.0
 var _dash_cd := 0.0
@@ -84,6 +88,7 @@ var _dead := false
 var _stun := 0.0
 var _throw_cd := 0.0
 var _drop_cd := 0.0
+var _no_dash_hint_t := 0.0
 var _fall_through: Platform = null
 var _fall_through_t := 0.0
 var _shake := 0.0
@@ -157,8 +162,10 @@ func _physics_process(delta: float) -> void:
 		MoveState.DASH:
 			_state_dash()
 		_:
-			# Стоит, бег, прыжок, падение пока делят одну физику (разделятся на этапах 2–4).
+			# Стоит, бег, прыжок, падение пока делят одну физику (разделятся на этапах 3–4).
 			_move(delta, dir, slow, ext != Vector2.ZERO, boost)
+			_corner_correction(delta)
+			_ledge_nudge(delta)
 	velocity += ext * delta
 	var was_on_floor := is_on_floor()
 	var fall_speed := velocity.y
@@ -188,6 +195,7 @@ func _tick(delta: float) -> void:
 	_stun -= delta
 	_throw_cd -= delta
 	_drop_cd -= delta
+	_no_dash_hint_t -= delta
 	if _fall_through_t > 0.0:
 		_fall_through_t -= delta
 		if _fall_through_t <= 0.0 and is_instance_valid(_fall_through):
@@ -209,23 +217,33 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 		ctl = lerpf(0.08, 1.0, 1.0 - _lock / _lock_total)
 	var on_floor := is_on_floor()
 	var target := dir * m.run_speed * slow
-	var overspeed := dir != 0.0 and absf(velocity.x) > absf(target) and signf(velocity.x) == signf(dir)
+	var vx := velocity.x
 	var rate: float
-	if dir != 0.0 and not overspeed:
-		rate = m.ground_accel if on_floor else m.air_accel
-	else:
+	if dir == 0.0:
 		rate = m.ground_decel if on_floor else m.air_decel
 		if pulled and on_floor:
 			rate *= m.pulled_friction_mult  # под внешней силой трение слабеет, иначе притяжение не чувствуется
-	velocity.x = move_toward(velocity.x, target, rate * ctl * delta)
+	elif signf(vx) == signf(dir) and absf(vx) > absf(target):
+		rate = m.overspeed_drag  # быстрее бега (после рывка, толчка) — гаснет плавно
+	elif on_floor and vx != 0.0 and signf(vx) != signf(dir):
+		rate = m.turn_accel  # резкий разворот на бегу
+	else:
+		rate = m.ground_accel if on_floor else m.air_accel
+	velocity.x = move_toward(vx, target, rate * ctl * delta)
 
-	velocity.y = minf(velocity.y + effective_gravity(velocity.y > 0.0) * delta, m.terminal_fall)
-
+	# Сначала толчок прыжка, потом гравитация того же кадра (полунеявный Эйлер, как в расчётах ТЗ).
 	if _buffer > 0.0 and _coyote > 0.0:
 		velocity.y = -m.jump_velocity * boost
 		_buffer = 0.0
 		_coyote = 0.0
 		_jumping = true
+		_apex_ok = true
+	if on_floor and velocity.y >= 0.0:
+		_apex_ok = false
+	var g := effective_gravity(velocity.y > 0.0)
+	if _apex_ok and not on_floor and absf(velocity.y) < m.apex_threshold and Input.is_action_pressed(&"az_jump"):
+		g *= m.apex_gravity_mult  # у вершины с зажатым Пробелом — время прицелиться
+	velocity.y = minf(velocity.y + g * delta, m.terminal_fall)
 	if _jumping:
 		if velocity.y >= 0.0:
 			_jumping = false
@@ -235,6 +253,11 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 
 
 func _try_dash(dir: float) -> void:
+	if not has_dash and charge <= 0:
+		if _no_dash_hint_t <= 0.0:
+			message.emit("Рывок — только с Вспышкой (или заряд Батарейки)")
+			_no_dash_hint_t = 3.0
+		return
 	if _dash_cd > 0.0 or _dash_t > 0.0:
 		return
 	if not is_on_floor():
@@ -243,14 +266,47 @@ func _try_dash(dir: float) -> void:
 		_air_dash_used = true
 	_dash_dir = int(signf(dir)) if dir != 0.0 else facing
 	facing = _dash_dir
-	_charged_dash = charge > 0
-	if _charged_dash:
+	# Заряд Батарейки тратится всегда, если он есть: без Вспышки это обычный рывок,
+	# со Вспышкой — усиленный.
+	var use_charge := charge > 0
+	_charged_dash = use_charge and has_dash
+	if use_charge:
 		_set_charge(charge - 1)
 	_dash_t = m.dash_time * (m.charged_dash_time if _charged_dash else 1.0)
 	_dash_cd = m.dash_cooldown
 	_jumping = false
+	_apex_ok = false
 	velocity.y = 0.0
 	change_state(MoveState.DASH)
+
+
+## Головой задел угол потолка на подъёме — сдвинуть вбок до corner_correction px вместо удара.
+func _corner_correction(delta: float) -> void:
+	if velocity.y >= 0.0:
+		return
+	var motion := Vector2(0.0, velocity.y * delta)
+	if not test_move(global_transform, motion):
+		return
+	for i in range(1, int(m.corner_correction) + 1):
+		for s in [-1.0, 1.0]:
+			var side := Vector2(i * s, 0.0)
+			if not test_move(global_transform, side) and not test_move(global_transform.translated(side), motion):
+				global_position.x += side.x
+				return
+
+
+## Ногами задел край уступа на подъёме — подбросить на него до ledge_nudge px.
+func _ledge_nudge(delta: float) -> void:
+	if is_on_floor() or velocity.y > m.apex_threshold or absf(velocity.x) < 1.0:
+		return
+	var motion := Vector2(velocity.x * delta, 0.0)
+	if not test_move(global_transform, motion):
+		return
+	for i in range(1, int(m.ledge_nudge) + 1):
+		var up := Vector2(0.0, -i)
+		if not test_move(global_transform, up) and not test_move(global_transform.translated(up), motion):
+			global_position.y -= i
+			return
 
 
 func _state_dash() -> void:
@@ -364,6 +420,7 @@ func apply_impulse(v: Vector2, control_lock: float = 0.0) -> void:
 	velocity += v
 	_dash_t = 0.0
 	_jumping = false
+	_apex_ok = false
 	_update_state()
 	_coyote = 0.0
 	if control_lock > 0.0:
@@ -412,18 +469,18 @@ func set_move_multiplier(m: float) -> void:
 # --- Параметры движения и состояния ---------------------------------------
 
 ## Пассивы артефактов пояса меняют эффективные параметры (вызывает BeltAura при смене пояса).
-func set_passives(jump_mult: float, grav_mult: float, regen: float) -> void:
+func set_passives(jump_mult: float, grav_mult: float, regen: float, dash: bool = false) -> void:
 	jump_multiplier = jump_mult
 	gravity_multiplier = grav_mult
 	regen_per_sec = regen
+	has_dash = dash
 	recompute_movement()
 
 
 ## Эффективные параметры = конфиг × пассивы. Пересчёт при смене пояса, а не каждый кадр.
 func recompute_movement() -> void:
 	m = config.duplicate() as MovementConfig
-	m.jump_velocity = config.jump_velocity * jump_multiplier
-	m.gravity = config.gravity * gravity_multiplier
+	m.derive(jump_multiplier, gravity_multiplier)
 
 
 ## Гравитация с учётом пассивов; при падении — усиленная. Нужна аномалиям (пар, парение).
