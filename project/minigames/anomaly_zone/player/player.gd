@@ -14,10 +14,12 @@ signal slot_selected(idx: int)
 signal charge_changed(value: int, max_value: int)
 signal state_changed(from: MoveState, to: MoveState)
 
-## Группы по схеме ТЗ: на земле (STAND, RUN), в воздухе (JUMP, FALL, DASH), на опоре (пока нет).
+## Группы по схеме ТЗ: на земле (STAND, RUN), в воздухе (JUMP, FALL, DASH, WALL_SLIDE),
+## на опоре (HANG — вис на краю, CLIMB — подтягивание, VAULT — быстрое перелезание).
 ## Оглушение — не состояние, а наложение поверх любого (is_stunned()).
-enum MoveState { STAND, RUN, JUMP, FALL, DASH }
-const STATE_NAMES := ["стоит", "бег", "прыжок", "падение", "рывок"]
+enum MoveState { STAND, RUN, JUMP, FALL, DASH, WALL_SLIDE, HANG, CLIMB, VAULT }
+const STATE_NAMES := ["стоит", "бег", "прыжок", "падение", "рывок", "скольжение по стене", "вис", "подтягивание", "перелезание"]
+const SUPPORT_STATES := [MoveState.HANG, MoveState.CLIMB, MoveState.VAULT]
 
 @export var config: MovementConfig = preload("res://minigames/anomaly_zone/player/movement_default.tres")
 
@@ -94,6 +96,22 @@ var _fall_through_t := 0.0
 var _shake := 0.0
 var _look := 0.0
 var _camera: Camera2D
+# Стена: скольжение, отскок.
+var _sliding := false
+var _wall_dir := 0
+var _wall_coyote := 0.0
+var _wall_jumps := 0
+var _wj_lock_t := 0.0
+var _wj_dir := 0
+# Зацеп за край и перелезание.
+var _ledge: Dictionary = {}
+var _ledge_seen_t := 0.0
+var _regrab_cd := 0.0
+var _climb_from := Vector2.ZERO
+var _climb_to := Vector2.ZERO
+var _climb_t := 0.0
+var _climb_total := 1.0
+var _climb_keep_vx := 0.0
 
 
 func _ready() -> void:
@@ -138,6 +156,7 @@ func _physics_process(delta: float) -> void:
 	if is_on_floor():
 		_coyote = m.coyote_time
 		_air_dash_used = false
+		_wall_jumps = 0
 	if not stunned and Input.is_action_just_pressed(&"az_jump"):
 		var plat := _floor_platform() if Input.is_action_pressed(&"az_down") else null
 		if plat and plat.one_way:
@@ -159,10 +178,16 @@ func _physics_process(delta: float) -> void:
 		use_best_consumable()
 
 	match state:
+		MoveState.HANG:
+			_state_hang(dir)
+			return
+		MoveState.CLIMB, MoveState.VAULT:
+			_state_climb(delta)
+			return
 		MoveState.DASH:
 			_state_dash()
 		_:
-			# Стоит, бег, прыжок, падение пока делят одну физику (разделятся на этапах 3–4).
+			# Стоит, бег, прыжок, падение, скольжение по стене делят одну физику.
 			_move(delta, dir, slow, ext != Vector2.ZERO, boost)
 			_corner_correction(delta)
 			_ledge_nudge(delta)
@@ -174,6 +199,11 @@ func _physics_process(delta: float) -> void:
 	if not was_on_floor and is_on_floor():
 		landing_speed = maxf(0.0, fall_speed)
 	_update_state()
+	if not stunned:
+		if is_on_floor():
+			_try_vault(dir)
+		elif state != MoveState.DASH:
+			_try_ledge_grab(dir)
 
 
 func _process(delta: float) -> void:
@@ -196,6 +226,10 @@ func _tick(delta: float) -> void:
 	_throw_cd -= delta
 	_drop_cd -= delta
 	_no_dash_hint_t -= delta
+	_wall_coyote -= delta
+	_wj_lock_t -= delta
+	_regrab_cd -= delta
+	_ledge_seen_t -= delta
 	if _fall_through_t > 0.0:
 		_fall_through_t -= delta
 		if _fall_through_t <= 0.0 and is_instance_valid(_fall_through):
@@ -215,7 +249,10 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 	var ctl := 1.0
 	if _lock > 0.0:
 		ctl = lerpf(0.08, 1.0, 1.0 - _lock / _lock_total)
+	if _wj_lock_t > 0.0 and dir != 0.0 and int(signf(dir)) == _wj_dir:
+		ctl *= m.wall_jump_control  # сразу после отскока к стене не тянет обратно
 	var on_floor := is_on_floor()
+	_sliding = false
 	var target := dir * m.run_speed * slow
 	var vx := velocity.x
 	var rate: float
@@ -238,12 +275,29 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 		_coyote = 0.0
 		_jumping = true
 		_apex_ok = true
+	elif _buffer > 0.0 and not on_floor and _wall_coyote > 0.0 and _wall_jumps < m.wall_jumps_max:
+		# Отскок от стены (при скольжении или сразу после отрыва).
+		velocity = Vector2(-_wall_dir * m.wall_jump_out, -m.wall_jump_up)
+		_wall_jumps += 1
+		_buffer = 0.0
+		_wall_coyote = 0.0
+		_wj_lock_t = m.wall_jump_lock
+		_wj_dir = _wall_dir
+		facing = -_wall_dir
+		_jumping = true
+		_apex_ok = true
 	if on_floor and velocity.y >= 0.0:
 		_apex_ok = false
 	var g := effective_gravity(velocity.y > 0.0)
 	if _apex_ok and not on_floor and absf(velocity.y) < m.apex_threshold and Input.is_action_pressed(&"az_jump"):
 		g *= m.apex_gravity_mult  # у вершины с зажатым Пробелом — время прицелиться
 	velocity.y = minf(velocity.y + g * delta, m.terminal_fall)
+	# Скольжение по стене: только при падении и прижимаясь к стене.
+	if not on_floor and velocity.y > 0.0 and dir != 0.0 and _touching_wall(int(signf(dir))):
+		velocity.y = minf(velocity.y, m.wall_slide_speed)
+		_sliding = true
+		_wall_dir = int(signf(dir))
+		_wall_coyote = m.wall_coyote
 	if _jumping:
 		if velocity.y >= 0.0:
 			_jumping = false
@@ -307,6 +361,144 @@ func _ledge_nudge(delta: float) -> void:
 		if not test_move(global_transform, up) and not test_move(global_transform.translated(up), motion):
 			global_position.y -= i
 			return
+
+
+# --- Стена, зацеп за край, перелезание --------------------------------------
+
+## Есть ли сплошная стена вплотную со стороны s (односторонние платформы стеной не считаются).
+func _touching_wall(s: int) -> bool:
+	return s != 0 and test_move(global_transform, Vector2(s * 2.0, 0.0))
+
+
+func _ray(from: Vector2, to: Vector2) -> Dictionary:
+	var q := PhysicsRayQueryParameters2D.create(from, to, 1, [get_rid()])
+	return get_world_2d().direct_space_state.intersect_ray(q)
+
+
+## Свободно ли место под тело с центром в c.
+func _box_free(c: Vector2) -> bool:
+	var q := PhysicsShapeQueryParameters2D.new()
+	var rect := RectangleShape2D.new()
+	rect.size = body_size - Vector2(2.0, 2.0)
+	q.shape = rect
+	q.transform = Transform2D(0.0, c)
+	q.collision_mask = 1
+	q.exclude = [get_rid()]
+	return get_world_2d().direct_space_state.intersect_shape(q, 1).is_empty()
+
+
+## Край уступа со стороны s: верх между грудью и ledge_above_head над головой, над ним можно стоять.
+func _find_ledge(s: int) -> Dictionary:
+	var half := body_size * 0.5
+	var px := global_position.x + s * (half.x + 3.0)
+	var hit := _ray(Vector2(px, global_position.y - half.y - m.ledge_above_head),
+		Vector2(px, global_position.y - m.ledge_chest_offset))
+	if hit.is_empty():
+		return {}
+	var top: float = hit.position.y
+	var side := _ray(Vector2(global_position.x, top + 2.0), Vector2(global_position.x + s * (half.x + 8.0), top + 2.0))
+	if side.is_empty():
+		return {}
+	var wall_x: float = side.position.x
+	var stand := Vector2(wall_x + s * (half.x + 2.0), top - half.y - 1.0)
+	if not _box_free(stand):
+		return {}
+	return {"top": top, "side": s, "wall_x": wall_x, "stand": stand}
+
+
+func _try_ledge_grab(dir: float) -> void:
+	if _regrab_cd > 0.0:
+		return
+	var s := int(signf(dir)) if dir != 0.0 else int(signf(velocity.x))
+	if s == 0:
+		return
+	var info := _find_ledge(s)
+	if not info.is_empty():
+		_ledge = info
+		_ledge_seen_t = m.grab_buffer
+	elif _ledge_seen_t > 0.0 and int(_ledge.get("side", 0)) == s:
+		info = _ledge  # край мелькнул в зоне в последние кадры — всё равно цепляемся
+	else:
+		return
+	var half := body_size * 0.5
+	var hang := Vector2(float(info["wall_x"]) - s * (half.x + 0.5), float(info["top"]) - m.hang_head_above + half.y)
+	if not _box_free(hang):
+		return
+	global_position = hang
+	velocity = Vector2.ZERO
+	_ledge = info
+	_buffer = 0.0
+	_jumping = false
+	_apex_ok = false
+	facing = s
+	change_state(MoveState.HANG)
+
+
+## Вис: висеть сколько угодно. W или к стене — подтянуться, S — отпустить, Пробел — прыжок от стены.
+func _state_hang(dir: float) -> void:
+	velocity = Vector2.ZERO
+	if is_stunned():
+		return
+	var s := int(_ledge.get("side", facing))
+	if Input.is_action_pressed(&"az_up") or (dir != 0.0 and int(signf(dir)) == s):
+		_start_climb(_ledge["stand"], m.climb_time, 0.0, MoveState.CLIMB)
+	elif Input.is_action_just_pressed(&"az_jump"):
+		velocity = Vector2(-s * m.wall_jump_out, -m.wall_jump_up)
+		facing = -s
+		_regrab_cd = m.regrab_cooldown
+		_wj_lock_t = m.wall_jump_lock
+		_wj_dir = s
+		_jumping = true
+		change_state(MoveState.JUMP)
+	elif Input.is_action_just_pressed(&"az_down"):
+		_regrab_cd = m.regrab_cooldown
+		change_state(MoveState.FALL)
+
+
+func _start_climb(to: Vector2, time: float, keep_vx: float, kind: MoveState) -> void:
+	_climb_from = global_position
+	_climb_to = to
+	_climb_t = 0.0
+	_climb_total = time
+	_climb_keep_vx = keep_vx
+	velocity = Vector2.ZERO
+	change_state(kind)
+
+
+## Подтягивание и перелезание: сначала вверх, потом через край. Без столкновений по пути.
+func _state_climb(delta: float) -> void:
+	_climb_t += delta
+	var t := clampf(_climb_t / _climb_total, 0.0, 1.0)
+	var ty := smoothstep(0.0, 0.6, t)
+	var tx := smoothstep(0.35, 1.0, t)
+	global_position = Vector2(lerpf(_climb_from.x, _climb_to.x, tx), lerpf(_climb_from.y, _climb_to.y, ty))
+	if t >= 1.0:
+		global_position = _climb_to
+		velocity = Vector2(_climb_keep_vx, 0.0)
+		change_state(MoveState.RUN if absf(_climb_keep_vx) > 5.0 else MoveState.STAND)
+
+
+## Быстрое перелезание: на бегу в препятствие ниже середины тела — через него без остановки.
+func _try_vault(dir: float) -> void:
+	if dir == 0.0 or absf(velocity.x) > 0.0 and signf(velocity.x) != signf(dir):
+		return
+	var s := int(signf(dir))
+	if not _touching_wall(s):
+		return
+	var half := body_size * 0.5
+	var feet := global_position.y + half.y
+	var px := global_position.x + s * (half.x + 3.0)
+	var hit := _ray(Vector2(px, feet - m.vault_max_height - 1.0), Vector2(px, feet - 1.0))
+	if hit.is_empty():
+		return  # выше середины тела — это уже не перелезание
+	var top: float = hit.position.y
+	var side := _ray(Vector2(global_position.x, top + 2.0), Vector2(global_position.x + s * (half.x + 8.0), top + 2.0))
+	if side.is_empty():
+		return
+	var stand := Vector2(float(side.position.x) + s * (half.x + 2.0), top - half.y - 1.0)
+	if not _box_free(stand):
+		return
+	_start_climb(stand, m.vault_time, s * maxf(absf(velocity.x), m.run_speed * 0.8), MoveState.VAULT)
 
 
 func _state_dash() -> void:
@@ -415,6 +607,9 @@ func _try_throw() -> void:
 
 ## Резкий толчок. control_lock — сколько секунд управление ослаблено.
 func apply_impulse(v: Vector2, control_lock: float = 0.0) -> void:
+	if state in SUPPORT_STATES:
+		_regrab_cd = m.regrab_cooldown  # толчок срывает с края
+		change_state(MoveState.FALL)
 	if v.y < 0.0:
 		velocity.y = minf(velocity.y, 0.0)  # подброс не должен «съедаться» падением
 	velocity += v
@@ -521,10 +716,14 @@ func change_state(s: MoveState) -> void:
 
 ## Состояние по факту: рывок, на земле (стоит/бег) или в воздухе (прыжок/падение).
 func _update_state() -> void:
+	if state in SUPPORT_STATES:
+		return  # из виса и подтягивания выходят явно
 	if _dash_t > 0.0:
 		change_state(MoveState.DASH)
 	elif is_on_floor():
 		change_state(MoveState.RUN if absf(velocity.x) > 5.0 else MoveState.STAND)
+	elif _sliding:
+		change_state(MoveState.WALL_SLIDE)
 	else:
 		change_state(MoveState.JUMP if velocity.y < 0.0 else MoveState.FALL)
 
@@ -581,6 +780,8 @@ func respawn(pos: Vector2, full_heal: bool) -> void:
 	_dash_t = 0.0
 	_lock = 0.0
 	_stun = 0.0
+	_regrab_cd = 0.0
+	_wall_jumps = 0
 	change_state(MoveState.FALL)
 	_dead = false
 	visible = true

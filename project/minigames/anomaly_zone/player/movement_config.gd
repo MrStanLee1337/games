@@ -50,6 +50,36 @@ extends Resource
 ## Сколько секунд игрок проходит сквозь одностороннюю платформу после S+Пробел.
 @export var drop_through_time := 0.25
 
+@export_group("Стена")
+## Падая и прижимаясь к стене, игрок съезжает не быстрее этого.
+@export var wall_slide_speed := 140.0
+## Отскок от стены: скорость от стены и вверх (подъём ~87 px).
+@export var wall_jump_out := 300.0
+@export var wall_jump_up := 520.0
+## Первые секунды после отскока управление к стене ослаблено, чтобы не прилипать обратно.
+@export var wall_jump_lock := 0.12
+@export var wall_jump_control := 0.3
+## Отскоков до касания земли.
+@export var wall_jumps_max := 2
+## Отскок срабатывает и сразу после отрыва от стены.
+@export var wall_coyote := 0.08
+
+@export_group("Зацеп и перелезание")
+## Зацеп: верх уступа между уровнем груди и этой высотой над головой, px.
+@export var ledge_above_head := 12.0
+## Уровень груди: px выше центра тела.
+@export var ledge_chest_offset := 7.0
+## Зацеп срабатывает, если край был в зоне в последние секунды.
+@export var grab_buffer := 0.08
+## Вис: голова на столько px выше края.
+@export var hang_head_above := 10.0
+@export var climb_time := 0.25
+## После «отпустить» (S) или прыжка со стены — не цепляться снова столько секунд.
+@export var regrab_cooldown := 0.3
+## Быстрое перелезание: препятствие ниже середины тела перелезается на бегу за это время.
+@export var vault_time := 0.12
+@export var vault_max_height := 24.0
+
 @export_group("Рывок (Вспышка)")
 @export var dash_speed := 850.0
 @export var dash_time := 0.2
