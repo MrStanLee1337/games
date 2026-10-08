@@ -1,6 +1,9 @@
 class_name Player
 extends CharacterBody2D
 ## Игрок: бег, прыжок, рывок, здоровье, камера.
+## Числа движения — в MovementConfig (movement_default.tres); игрок читает эффективную копию `m`
+## (конфиг × пассивы артефактов), её пересчитывает recompute_movement().
+## Движение разложено по состояниям (enum MoveState); переход — только через change_state().
 ## Внешние силы (аномалии) действуют через apply_impulse / add_external_force / set_move_multiplier.
 
 signal health_changed(hp: float, max_hp: float)
@@ -9,31 +12,14 @@ signal died
 signal message(text: String)
 signal slot_selected(idx: int)
 signal charge_changed(value: int, max_value: int)
+signal state_changed(from: MoveState, to: MoveState)
 
-@export_group("Тело")
-@export var body_size := Vector2(24, 40)
+## Группы по схеме ТЗ: на земле (STAND, RUN), в воздухе (JUMP, FALL, DASH), на опоре (пока нет).
+## Оглушение — не состояние, а наложение поверх любого (is_stunned()).
+enum MoveState { STAND, RUN, JUMP, FALL, DASH }
+const STATE_NAMES := ["стоит", "бег", "прыжок", "падение", "рывок"]
 
-@export_group("Бег")
-@export var max_speed := 300.0
-@export var ground_accel := 2800.0
-@export var ground_decel := 3600.0
-@export var air_accel := 1500.0
-@export var air_decel := 700.0
-
-@export_group("Прыжок")
-@export var jump_velocity := 560.0
-## Во сколько раз обрезается скорость подъёма, когда кнопку отпустили.
-@export_range(0.0, 1.0) var jump_cut := 0.4
-@export var coyote_time := 0.1
-@export var jump_buffer := 0.12
-@export var gravity := 1500.0
-@export var fall_gravity_mult := 1.6
-@export var max_fall_speed := 900.0
-
-@export_group("Рывок")
-@export var dash_speed := 720.0
-@export var dash_time := 0.18
-@export var dash_cooldown := 0.4
+@export var config: MovementConfig = preload("res://minigames/anomaly_zone/player/movement_default.tres")
 
 @export_group("Здоровье")
 @export var max_hp := 100.0
@@ -52,24 +38,24 @@ signal charge_changed(value: int, max_value: int)
 
 @export_group("Заряд (Батарейка)")
 @export var max_charge := 3
-## Усиленный рывок: множители скорости и длительности.
-@export var charged_dash_speed := 1.6
-@export var charged_dash_time := 1.3
 @export var overload_damage := 25.0
 
 @export_group("Аура артефактов")
 @export var aura_radius := 160.0
 
-@export_group("Камера")
-@export var look_ahead := 90.0
-@export var look_ahead_speed := 3.0
-@export var cam_smoothing := 7.0
-@export var shake_decay := 40.0
-
-# Множители, которые потом выставляют артефакты.
+# Пассивы артефактов пояса (выставляет BeltAura через set_passives).
 var jump_multiplier := 1.0
 var gravity_multiplier := 1.0
 var regen_per_sec := 0.0
+
+## Эффективные параметры движения: копия config с учётом пассивов. Только для чтения.
+var m: MovementConfig
+var state: MoveState = MoveState.STAND
+## Последние смены состояния — для оверлея F1.
+var state_log: Array[String] = []
+var body_size: Vector2:
+	get:
+		return config.body_size()
 
 var hp := 0.0
 var inventory := Inventory.new()
@@ -106,6 +92,7 @@ var _camera: Camera2D
 
 
 func _ready() -> void:
+	recompute_movement()
 	add_to_group(&"player")
 	collision_layer = 2
 	collision_mask = 1
@@ -116,7 +103,7 @@ func _ready() -> void:
 	add_child(cs)
 	_camera = Camera2D.new()
 	_camera.position_smoothing_enabled = true
-	_camera.position_smoothing_speed = cam_smoothing
+	_camera.position_smoothing_speed = m.cam_smoothing
 	add_child(_camera)
 	_camera.make_current()
 	inventory.setup(belt_slots)
@@ -141,17 +128,17 @@ func _physics_process(delta: float) -> void:
 
 	var stunned := _stun > 0.0
 	var dir := 0.0 if stunned else Input.get_axis(&"az_left", &"az_right")
-	if dir != 0.0 and _dash_t <= 0.0:
+	if dir != 0.0 and state != MoveState.DASH:
 		facing = 1 if dir > 0.0 else -1
 	if is_on_floor():
-		_coyote = coyote_time
+		_coyote = m.coyote_time
 		_air_dash_used = false
 	if not stunned and Input.is_action_just_pressed(&"az_jump"):
 		var plat := _floor_platform() if Input.is_action_pressed(&"az_down") else null
 		if plat and plat.one_way:
 			_drop_through(plat)  # вниз + прыжок на односторонней платформе — спрыгнуть
 		else:
-			_buffer = jump_buffer
+			_buffer = m.jump_buffer
 	if not stunned and Input.is_action_just_pressed(&"az_dash"):
 		_try_dash(dir)
 	for i in mini(3, inventory.belt.size()):
@@ -166,10 +153,12 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed(&"az_heal"):
 		use_best_consumable()
 
-	if _dash_t > 0.0:
-		velocity = Vector2(_dash_dir * dash_speed * (charged_dash_speed if _charged_dash else 1.0), 0.0)
-	else:
-		_move(delta, dir, slow, ext != Vector2.ZERO, boost)
+	match state:
+		MoveState.DASH:
+			_state_dash()
+		_:
+			# Стоит, бег, прыжок, падение пока делят одну физику (разделятся на этапах 2–4).
+			_move(delta, dir, slow, ext != Vector2.ZERO, boost)
 	velocity += ext * delta
 	var was_on_floor := is_on_floor()
 	var fall_speed := velocity.y
@@ -177,14 +166,15 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	if not was_on_floor and is_on_floor():
 		landing_speed = maxf(0.0, fall_speed)
+	_update_state()
 
 
 func _process(delta: float) -> void:
-	var want := facing * look_ahead if absf(velocity.x) > 30.0 else 0.0
-	_look = lerpf(_look, want, 1.0 - exp(-look_ahead_speed * delta))
-	_shake = maxf(0.0, _shake - shake_decay * delta)
+	var want := facing * m.look_ahead if absf(velocity.x) > 30.0 else 0.0
+	_look = lerpf(_look, want, 1.0 - exp(-m.look_ahead_speed * delta))
+	_shake = maxf(0.0, _shake - m.shake_decay * delta)
 	var jitter := Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
-	_camera.offset = Vector2(_look, -24.0) + jitter
+	_camera.offset = Vector2(_look, m.cam_offset_y) + jitter
 	modulate.a = 0.35 if _invuln > 0.0 and int(_invuln * 20.0) % 2 == 0 else 1.0
 	queue_redraw()
 
@@ -206,7 +196,8 @@ func _tick(delta: float) -> void:
 	if _dash_t > 0.0:
 		_dash_t -= delta
 		if _dash_t <= 0.0:
-			velocity.x = _dash_dir * max_speed * 0.9
+			velocity.x = _dash_dir * m.run_speed * m.dash_end_speed
+			_update_state()
 	if regen_per_sec > 0.0 and hp < max_hp:
 		_set_hp(minf(max_hp, hp + regen_per_sec * delta))
 
@@ -217,24 +208,21 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 	if _lock > 0.0:
 		ctl = lerpf(0.08, 1.0, 1.0 - _lock / _lock_total)
 	var on_floor := is_on_floor()
-	var target := dir * max_speed * slow
+	var target := dir * m.run_speed * slow
 	var overspeed := dir != 0.0 and absf(velocity.x) > absf(target) and signf(velocity.x) == signf(dir)
 	var rate: float
 	if dir != 0.0 and not overspeed:
-		rate = ground_accel if on_floor else air_accel
+		rate = m.ground_accel if on_floor else m.air_accel
 	else:
-		rate = ground_decel if on_floor else air_decel
+		rate = m.ground_decel if on_floor else m.air_decel
 		if pulled and on_floor:
-			rate *= 0.25  # под действием внешней силы трение слабеет, иначе притяжение не чувствуется
+			rate *= m.pulled_friction_mult  # под внешней силой трение слабеет, иначе притяжение не чувствуется
 	velocity.x = move_toward(velocity.x, target, rate * ctl * delta)
 
-	var g := gravity * gravity_multiplier
-	if velocity.y > 0.0:
-		g *= fall_gravity_mult
-	velocity.y = minf(velocity.y + g * delta, max_fall_speed)
+	velocity.y = minf(velocity.y + effective_gravity(velocity.y > 0.0) * delta, m.terminal_fall)
 
 	if _buffer > 0.0 and _coyote > 0.0:
-		velocity.y = -jump_velocity * jump_multiplier * boost
+		velocity.y = -m.jump_velocity * boost
 		_buffer = 0.0
 		_coyote = 0.0
 		_jumping = true
@@ -242,7 +230,7 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 		if velocity.y >= 0.0:
 			_jumping = false
 		elif not Input.is_action_pressed(&"az_jump"):
-			velocity.y *= jump_cut
+			velocity.y *= m.jump_cut
 			_jumping = false
 
 
@@ -258,10 +246,15 @@ func _try_dash(dir: float) -> void:
 	_charged_dash = charge > 0
 	if _charged_dash:
 		_set_charge(charge - 1)
-	_dash_t = dash_time * (charged_dash_time if _charged_dash else 1.0)
-	_dash_cd = dash_cooldown
+	_dash_t = m.dash_time * (m.charged_dash_time if _charged_dash else 1.0)
+	_dash_cd = m.dash_cooldown
 	_jumping = false
 	velocity.y = 0.0
+	change_state(MoveState.DASH)
+
+
+func _state_dash() -> void:
+	velocity = Vector2(_dash_dir * m.dash_speed * (m.charged_dash_speed if _charged_dash else 1.0), 0.0)
 
 
 func _try_interact() -> void:
@@ -312,7 +305,7 @@ func _drop_through(plat: Platform) -> void:
 	if is_instance_valid(_fall_through):
 		remove_collision_exception_with(_fall_through)
 	_fall_through = plat
-	_fall_through_t = 0.25
+	_fall_through_t = m.drop_through_time
 	add_collision_exception_with(plat)
 	position.y += 2.0
 	_coyote = 0.0
@@ -371,6 +364,7 @@ func apply_impulse(v: Vector2, control_lock: float = 0.0) -> void:
 	velocity += v
 	_dash_t = 0.0
 	_jumping = false
+	_update_state()
 	_coyote = 0.0
 	if control_lock > 0.0:
 		_lock = control_lock
@@ -413,6 +407,69 @@ func _set_charge(v: int) -> void:
 ## Замедление. Вызывать каждый физический кадр; из нескольких источников берётся минимум.
 func set_move_multiplier(m: float) -> void:
 	_mult_acc = minf(_mult_acc, m)
+
+
+# --- Параметры движения и состояния ---------------------------------------
+
+## Пассивы артефактов пояса меняют эффективные параметры (вызывает BeltAura при смене пояса).
+func set_passives(jump_mult: float, grav_mult: float, regen: float) -> void:
+	jump_multiplier = jump_mult
+	gravity_multiplier = grav_mult
+	regen_per_sec = regen
+	recompute_movement()
+
+
+## Эффективные параметры = конфиг × пассивы. Пересчёт при смене пояса, а не каждый кадр.
+func recompute_movement() -> void:
+	m = config.duplicate() as MovementConfig
+	m.jump_velocity = config.jump_velocity * jump_multiplier
+	m.gravity = config.gravity * gravity_multiplier
+
+
+## Гравитация с учётом пассивов; при падении — усиленная. Нужна аномалиям (пар, парение).
+func effective_gravity(falling: bool) -> float:
+	return m.gravity * (m.fall_gravity_mult if falling else 1.0)
+
+
+## Расчётные высота и дальность полного прыжка с разбега (для оверлея F1).
+func predicted_jump() -> Vector2:
+	var v := m.jump_velocity
+	var h := v * v / (2.0 * m.gravity)
+	var t_up := v / m.gravity
+	var t_down := sqrt(2.0 * h / (m.gravity * m.fall_gravity_mult))
+	return Vector2(h, m.run_speed * (t_up + t_down))
+
+
+func is_stunned() -> bool:
+	return _stun > 0.0
+
+
+func state_name() -> String:
+	return STATE_NAMES[state]
+
+
+func change_state(s: MoveState) -> void:
+	if s == state:
+		return
+	var from := state
+	state = s
+	var line := "%.2f %s → %s" % [Time.get_ticks_msec() / 1000.0, STATE_NAMES[from], STATE_NAMES[s]]
+	state_log.append(line)
+	if state_log.size() > 6:
+		state_log.remove_at(0)
+	if config.log_states:
+		print("[player] ", line)
+	state_changed.emit(from, s)
+
+
+## Состояние по факту: рывок, на земле (стоит/бег) или в воздухе (прыжок/падение).
+func _update_state() -> void:
+	if _dash_t > 0.0:
+		change_state(MoveState.DASH)
+	elif is_on_floor():
+		change_state(MoveState.RUN if absf(velocity.x) > 5.0 else MoveState.STAND)
+	else:
+		change_state(MoveState.JUMP if velocity.y < 0.0 else MoveState.FALL)
 
 
 # --- Здоровье ------------------------------------------------------------
@@ -467,6 +524,7 @@ func respawn(pos: Vector2, full_heal: bool) -> void:
 	_dash_t = 0.0
 	_lock = 0.0
 	_stun = 0.0
+	change_state(MoveState.FALL)
 	_dead = false
 	visible = true
 	_invuln = 0.8
@@ -489,7 +547,7 @@ func _set_hp(v: float) -> void:
 
 func _draw() -> void:
 	var col := Color("dfe3ee")
-	if _dash_t > 0.0:
+	if state == MoveState.DASH:
 		col = Color("ffe46b") if _charged_dash else Color("8fd3ff")
 	var half := body_size * 0.5
 	draw_rect(Rect2(-half, body_size), col)

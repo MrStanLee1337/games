@@ -183,7 +183,7 @@ func _steam_tick() -> void:
 	var lift := steam_lift * current_intensity
 	for p in _players():
 		# Компенсируем гравитацию (и при падении тоже) и добавляем подъём — игрок держится у верха.
-		var g := p.gravity * p.gravity_multiplier * (p.fall_gravity_mult if p.velocity.y > 0.0 else 1.0)
+		var g := p.effective_gravity(p.velocity.y > 0.0)
 		var extra := 0.0
 		if p.velocity.y > 0.0:
 			extra = lift * 2.5  # падает обратно в столб — тормозим резко, чтобы держался у верха

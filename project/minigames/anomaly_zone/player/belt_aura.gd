@@ -48,9 +48,7 @@ func _on_inventory_changed() -> void:
 		grav *= art.passives.get("gravity_mult", 1.0)
 		regen += art.passives.get("regen", 0.0)
 		sum += art.color
-	_player.jump_multiplier = jump
-	_player.gravity_multiplier = grav
-	_player.regen_per_sec = regen
+	_player.set_passives(jump, grav, regen)
 	if _has_belt:
 		_aura_color = Color(sum.r / arts.size(), sum.g / arts.size(), sum.b / arts.size(), 1.0)
 	if is_inside_tree():

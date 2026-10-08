@@ -40,8 +40,18 @@ func _draw() -> void:
 	var belt: Array[String] = []
 	for it in player.inventory.belt_artifacts():
 		belt.append(it.display_name)
-	_text(font, pc + Vector2(-70.0, -78.0), "Пояс: " + (", ".join(belt) if not belt.is_empty() else "пусто"))
-	_text(font, pc + Vector2(-70.0, -63.0), "прыжок ×%.2f  грав ×%.2f  рег %.1f/с" % [player.jump_multiplier, player.gravity_multiplier, player.regen_per_sec])
+	var jp := player.predicted_jump()
+	var lines: Array[String] = [
+		"Пояс: " + (", ".join(belt) if not belt.is_empty() else "пусто"),
+		"прыжок ×%.2f  грав ×%.2f  рег %.1f/с" % [player.jump_multiplier, player.gravity_multiplier, player.regen_per_sec],
+		"%s%s  vx %d  vy %d" % [player.state_name(), "  ОГЛУШЁН" if player.is_stunned() else "", int(player.velocity.x), int(player.velocity.y)],
+		"койот %.2f  буфер %.2f" % [maxf(0.0, player._coyote), maxf(0.0, player._buffer)],
+		"расчёт прыжка: высота %d, дальность %d px" % [int(jp.x), int(jp.y)],
+	]
+	for i in lines.size():
+		_text(font, pc + Vector2(-70.0, -138.0 + i * 15.0), lines[i])
+	for i in player.state_log.size():
+		_text(font, pc + Vector2(60.0, -138.0 + i * 15.0), player.state_log[i])
 
 
 func _text(font: Font, pos: Vector2, text: String) -> void:

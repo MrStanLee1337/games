@@ -86,7 +86,7 @@ func _float_tick() -> void:
 	var rect := _float_rect()
 	var p := get_tree().get_first_node_in_group(&"player") as Player
 	if p and rect.has_point(p.global_position):
-		var g := p.gravity * p.gravity_multiplier * (p.fall_gravity_mult if p.velocity.y > 0.0 else 1.0)
+		var g := p.effective_gravity(p.velocity.y > 0.0)
 		var extra := float_accel if p.velocity.y > -float_speed * current_intensity else 0.0
 		p.add_external_force(Vector2(0.0, -(g + extra)))
 	for n in get_tree().get_nodes_in_group(&"bolts"):
