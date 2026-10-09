@@ -1,14 +1,18 @@
 extends "res://core/minigame.gd"
-## Корень мини-игры «Зона: забег»: собирает уровень, игрока, волну Выброса и HUD, ведёт забег от А до Б.
-## Чекпоинтов нет: смерть и R начинают забег заново — уровень строится с нуля,
-## артефакты, расходники и заряды теряются. Яма — урон и возврат на последнее твёрдое место.
+## Корень мини-игры «Зона: забег»: игрок, волна Выброса, HUD и участки забега по маршруту
+## (участок 1 → развилка 2а/2б → участок 3). Между участками — укрытие: волна останавливается и на
+## следующем участке стартует заново; HP, артефакты и заряды сохраняются, баффы сбрасываются.
+## Чекпоинтов нет: смерть и R начинают забег заново — артефакты, расходники и заряды теряются.
+## Яма — урон и возврат на последнее твёрдое место.
 
 const FALL_DAMAGE := 25.0
 const RESTART_DELAY := 0.8
+## Пауза в укрытии перед следующим участком.
+const SHELTER_DELAY := 1.2
 ## Твёрдое место для возврата из ямы: игрок простоял на полу хотя бы столько секунд.
 const SAFE_TIME := 0.25
 
-## Песочница взаимодействий вместо трассы (sandbox.tscn).
+## Песочница взаимодействий вместо забега (sandbox.tscn): один уровень, без волны.
 @export var sandbox := false
 ## Сид забега (содержимое тайников); -1 — случайный. Для повторяемости в тестах.
 @export var run_seed := -1
@@ -28,6 +32,9 @@ var cache_choice: CacheChoice
 var attempt := 1
 
 var _restarting := false
+var _in_shelter := false
+## Номер загрузки участка: отложенный переход из укрытия срабатывает, только если участок тот же.
+var _load_id := 0
 var _time := 0.0
 var _finished := false
 var _safe_pos := Vector2.ZERO
@@ -48,7 +55,6 @@ func _ready() -> void:
 	add_child(run)
 	player = Player.new()
 	world.add_child(player)
-	_build_level()
 	wave = BlowoutWave.new()
 	wave.player = player
 	wave.caught.connect(_on_wave_caught)
@@ -77,6 +83,7 @@ func _ready() -> void:
 	player.charge_changed.connect(hud.set_charge)
 	player.inventory.item_added.connect(_on_item_added)
 	overlay.player = player
+	overlay.zone = self
 	player.health_changed.connect(hud.set_health)
 	player.died.connect(_on_player_died)
 	_begin_run()
@@ -125,23 +132,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_tree().quit()
 
 
-## Новый забег с точки А: уровень с нуля (аномалии и предметы на местах), игрок без вещей.
+## Новый забег с точки А участка 1: игрок без вещей, новый сид тайников.
 func restart_run() -> void:
 	attempt += 1
-	world.remove_child(level)  # из групп аномалий и предметов уходит сразу
-	level.queue_free()
-	_build_level()
 	_begin_run()
-
-
-func _build_level() -> void:
-	level = SandboxLevel.new() if sandbox else DemoLevel.new()
-	world.add_child(level)
-	world.move_child(level, 0)  # уровень рисуется под игроком
-	level.finish_sign.reached.connect(_on_finish)
-	for n in level.get_children():
-		if n is Cache:
-			(n as Cache).opened.connect(_on_cache_opened)
 
 
 func _begin_run() -> void:
@@ -149,19 +143,84 @@ func _begin_run() -> void:
 	_restarting = false
 	_finished = false
 	_time = 0.0
+	hud.hide_finish()
+	_load_section(true)
+
+
+## Построить текущий участок маршрута и поставить игрока в его точку А; волна стартует заново.
+func _load_section(new_run: bool) -> void:
+	if level:
+		world.remove_child(level)  # из групп аномалий и предметов уходит сразу
+		level.queue_free()
+	_load_id += 1
+	level = _make_level()
+	world.add_child(level)
+	world.move_child(level, 0)  # уровень рисуется под игроком
+	level.goal.connect(&"reached", _on_goal)
+	for n in level.get_children():
+		if n is Cache:
+			(n as Cache).opened.connect(_on_cache_opened)
+		elif n is ForkDoor:
+			(n as ForkDoor).chosen.connect(_on_door_chosen)
+	_in_shelter = false
 	_safe_t = 0.0
 	_safe_pos = level.start_pos + Vector2(0.0, -player.body_size.y * 0.5 - 1.0)
 	player.set_camera_limits(level.bounds)
-	player.reset_run(_safe_pos)
+	if new_run:
+		player.reset_run(_safe_pos)
+	else:
+		player.start_section(_safe_pos)
 	wave.start(level.start_pos.x, level.wave_speed, level.bounds)
-	hud.hide_finish()
+	var rs := level as RunSection
+	hud.set_section_label("%s (%d/%d)" % [rs.title, run.index + 1, run.section_count()] if rs else "")
+
+
+func _make_level() -> ZoneLevel:
+	if sandbox:
+		return SandboxLevel.new()
+	match run.section_id():
+		RunManager.SECTION_1:
+			return Section1.new()
+		RunManager.BRANCH_A:
+			return Section2a.new()
+		RunManager.BRANCH_B:
+			return Section2b.new()
+		_:
+			return Section3.new()
+
+
+## Точка Б участка: укрытие (волна стоит) — развилка, следующий участок или финиш забега.
+func _on_goal() -> void:
+	if _in_shelter or _restarting:
+		return
+	_in_shelter = true
+	wave.stop()
+	var rs := level as RunSection
+	if sandbox or rs == null or run.is_last():
+		_on_finish()
+	elif not rs.doors.is_empty():
+		hud.show_message("Укрытие. Выберите дверь (E)")
+	else:
+		hud.show_message("Укрытие — волна прошла мимо")
+		var id := _load_id
+		await get_tree().create_timer(SHELTER_DELAY).timeout
+		if _in_shelter and not _restarting and id == _load_id:
+			run.advance()
+			_load_section(false)
+
+
+func _on_door_chosen(branch: StringName) -> void:
+	if not _in_shelter:
+		return
+	for d in (level as RunSection).doors:
+		d.locked = true
+	run.choose_branch(branch)
+	run.advance()
+	_load_section(false)
 
 
 ## F2: все артефакты, которых ещё нет у игрока (для тестов).
 func _give_all_artifacts() -> void:
-	if ArtifactDb.artifact_ids().is_empty():
-		hud.show_message("Артефактов пока нет")
-		return
 	var added := 0
 	for id in ArtifactDb.artifact_ids():
 		if not player.stats.has_artifact(id):

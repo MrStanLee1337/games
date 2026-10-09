@@ -15,6 +15,8 @@ var start_pos := Vector2.ZERO
 ## v = (xБ − xА + 480) / (1.1 · T_safe), T_safe — время безопасной дороги.
 var wave_speed := 0.0
 var finish_sign: FinishSign
+## Точка Б уровня: узел с сигналом reached (табличка финиша или укрытие участка).
+var goal: Node2D
 
 
 func _ready() -> void:
@@ -39,13 +41,14 @@ func _build() -> void:
 
 ## x точки Б (финиш или укрытие участка).
 func finish_x() -> float:
-	return finish_sign.global_position.x if finish_sign else bounds.end.x
+	return goal.global_position.x if goal else bounds.end.x
 
 
 func _finish_at(x: float) -> void:
 	finish_sign = FinishSign.new()
 	finish_sign.position = Vector2(x, FLOOR_Y)
 	add_child(finish_sign)
+	goal = finish_sign
 
 
 # --- Помощники -------------------------------------------------------------

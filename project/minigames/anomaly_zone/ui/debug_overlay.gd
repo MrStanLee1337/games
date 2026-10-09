@@ -6,6 +6,8 @@ extends Node2D
 const STATE_NAMES := ["idle", "telegraph", "active", "cooldown"]
 
 var player: Player
+## Корень «Зоны» (для отрыва от волны).
+var zone: Node
 
 
 func _process(_delta: float) -> void:
@@ -50,6 +52,7 @@ func _draw() -> void:
 		"последнее падение %d px (без урона до %d)" % [int(player.last_fall), int(player.m.safe_fall_height)],
 		"бег %d  макс. HP %d  баффы: %s" % [int(player.m.run_speed), int(player.max_hp), _buffs_text()],
 		"баффов по типам: %s" % _counts_text(),
+		"отрыв от волны %.1f с" % zone.wave.gap_seconds() if zone and zone.wave.is_running() else "волна стоит",
 	]
 	for i in lines.size():
 		_text(font, pc + Vector2(-70.0, -198.0 + i * 15.0), lines[i])
