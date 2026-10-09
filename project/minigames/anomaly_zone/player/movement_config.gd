@@ -157,12 +157,42 @@ extends Resource
 @export var charged_dash_speed := 1.6
 @export var charged_dash_time := 1.3
 
+@export_group("Тихий шаг и детектор")
+## Тихий шаг (Ctrl) и потолок скорости с детектором в руке; ускорения те же.
+@export var walk_speed := 110.0
+## Достать детектор (X) — столько секунд. Убрать — мгновенно (и Пробелом с прыжком).
+@export var detector_draw_time := 0.3
+
+@export_group("Шум")
+## Радиусы шума, px. Шаги шумят раз в noise_step_interval секунд.
+@export var noise_run := 220.0
+@export var noise_walk := 60.0
+@export var noise_slide := 160.0
+## Приземление: noise_land + noise_land_per_px × высота падения.
+@export var noise_land := 80.0
+@export var noise_land_per_px := 0.3
+@export var noise_bolt := 180.0
+@export var noise_step_interval := 0.3
+
 @export_group("Камера")
-@export var look_ahead := 90.0
-@export var look_ahead_speed := 3.0
+## Зум относительно базового: транзит 1, в поле аномалии и с детектором в руке ближе.
+@export var zoom_field := 1.2
+@export var zoom_detector := 1.35
+@export var zoom_time := 0.6
+## Взгляд вперёд по направлению бега: смещение и за сколько секунд набирается.
+@export var look_ahead := 64.0
+@export var look_ahead_time := 0.4
+## Падение быстрее fall_look_speed — камера смещается вниз до fall_look px.
+@export var fall_look_speed := 600.0
+@export var fall_look := 96.0
+@export var fall_look_time := 0.3
+## Мёртвая зона по вертикали: камера не дёргается на каждом прыжке.
+@export var dead_zone_y := 24.0
 @export var cam_smoothing := 7.0
 @export var cam_offset_y := -24.0
-@export var shake_decay := 40.0
+## Тряска только от урона и жёсткого приземления, не больше shake_max px.
+@export var shake_max := 4.0
+@export var shake_decay := 20.0
 
 @export_group("Отладка")
 ## Печатать смену состояний в консоль (в оверлее F1 последние смены видны всегда).

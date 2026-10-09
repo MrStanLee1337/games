@@ -3,7 +3,7 @@ extends Control
 ## HUD «Зоны»: полоса HP, пояс, груз с порогами и потерянными приёмами, подсказка по клавишам (H),
 ## всплывающие сообщения.
 
-const HINTS := "A/D ← → — бег    Пробел/W — прыжок    Shift — рывок (Вспышка)    F — болт    E — подобрать    Q — лечение    1/2/3 — слот, G — бросить (S+G — положить)\nS — подкат/ползком/перекат    Tab — инвентарь    S+Пробел — спрыгнуть с платформы    R — чекпоинт    H — скрыть    F1 — отладка    F2 — артефакты    Esc — выход"
+const HINTS := "A/D ← → — бег    Пробел/W — прыжок    Shift — рывок (Вспышка)    F — болт    E — подобрать    Q — лечение    1/2/3 — слот, G — бросить (S+G — положить)\nS — подкат/ползком/перекат    Tab — инвентарь    S+Пробел — спрыгнуть с платформы    R — чекпоинт    H — скрыть    F1 — отладка    F2 — артефакты    Esc — выход\nCtrl — тихий шаг    X — детектор в руке (Пробел убирает и прыгает)"
 const SLOT := 44.0
 const TIER_COLORS := [Color("5ad17a"), Color("f2c14e"), Color("ff8a2b"), Color("ef4f4f")]
 const MOVE_ORDER: Array[StringName] = [&"wall_jump", &"air_dash", &"slide", &"grab", &"dash"]
@@ -55,7 +55,7 @@ func _ready() -> void:
 
 func _layout() -> void:
 	var vp := get_viewport_rect().size
-	_hints.position = Vector2(24.0, vp.y - 62.0)
+	_hints.position = Vector2(24.0, vp.y - 82.0)
 	_message.size = Vector2(600.0, 36.0)
 	_message.position = Vector2((vp.x - 600.0) * 0.5, 70.0)
 

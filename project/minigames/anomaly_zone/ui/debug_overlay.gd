@@ -35,6 +35,12 @@ func _draw() -> void:
 		var extra := a.debug_extra()
 		if extra != "":
 			_text(font, p + Vector2(0.0, 30.0), extra)
+	for f in get_tree().get_nodes_in_group(&"anomaly_fields"):
+		draw_rect((f as AnomalyField).zone_rect(), Color(0.6, 0.8, 1.0, 0.25), false, 1.0)
+	# Круг шума: последний сигнал, гаснет за 0.6 с.
+	var age := (Time.get_ticks_msec() - player.last_noise_msec) / 1000.0
+	if age < 0.6:
+		draw_arc(player.last_noise_pos, player.last_noise_radius, 0.0, TAU, 64, Color(1.0, 0.5, 0.3, 0.7 * (1.0 - age / 0.6)), 2.0)
 	var pc := player.global_position
 	draw_arc(pc, player.aura_radius, 0.0, TAU, 72, Color(1, 1, 1, 0.3), 1.0)
 	var belt: Array[String] = []
@@ -48,12 +54,14 @@ func _draw() -> void:
 		"койот %.2f  буфер %.2f" % [maxf(0.0, player._coyote), maxf(0.0, player._buffer)],
 		"расчёт прыжка: высота %d, дальность %d px" % [int(jp.x), int(jp.y)],
 		"груз %.1f кг (эфф. %.1f) — %s" % [player.load_kg, player.effective_load, MovementConfig.TIER_NAMES[player.m.tier]],
+		"шум %d px  зум %.2f%s%s" % [int(player.last_noise_radius), player.camera_zoom(),
+			"  детектор" if player.detector_out else "", "  тихо (Ctrl)" if Input.is_action_pressed(&"az_walk") else ""],
 		"последнее падение %d px (без урона до %d)" % [int(player.last_fall), int(player.m.safe_fall_height)],
 	]
 	for i in lines.size():
-		_text(font, pc + Vector2(-70.0, -138.0 + i * 15.0), lines[i])
+		_text(font, pc + Vector2(-70.0, -168.0 + i * 15.0), lines[i])
 	for i in player.state_log.size():
-		_text(font, pc + Vector2(60.0, -138.0 + i * 15.0), player.state_log[i])
+		_text(font, pc + Vector2(250.0, -168.0 + i * 15.0), player.state_log[i])
 
 
 func _text(font: Font, pos: Vector2, text: String) -> void:

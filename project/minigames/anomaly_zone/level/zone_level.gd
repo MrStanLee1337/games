@@ -4,6 +4,8 @@ extends Node2D
 ## Наследник переопределяет _build().
 
 const FLOOR_Y := 600.0
+## Поле аномалии (камера приближается) — габариты аномалии плюс этот отступ.
+const FIELD_MARGIN := 120.0
 
 var bounds := Rect2(-200.0, -300.0, 8600.0, 1300.0)
 var fall_y := 960.0
@@ -13,6 +15,18 @@ var finish_sign: FinishSign
 
 func _ready() -> void:
 	_build()
+	_add_anomaly_fields()
+
+
+## Вокруг каждой аномалии — AnomalyField: внутри камера приближается.
+func _add_anomaly_fields() -> void:
+	for c in get_children():
+		if c is Anomaly:
+			var r := (c as Anomaly).world_bounds().grow(FIELD_MARGIN)
+			var f := AnomalyField.new()
+			f.size = r.size
+			add_child(f)
+			f.global_position = r.position
 
 
 func _build() -> void:

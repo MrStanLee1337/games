@@ -15,6 +15,8 @@ signal charge_changed(value: int, max_value: int)
 signal state_changed(from: MoveState, to: MoveState)
 ## Груз или его порог изменились (после пересчёта параметров движения).
 signal load_changed(kg: float, effective_kg: float, tier: MovementConfig.Tier)
+## Шум: шаги, подкат, приземление, удар болта. Слушателей пока нет — задел под мутантов.
+signal noise_emitted(pos: Vector2, radius: float)
 
 ## Группы по схеме ТЗ: на земле (STAND, RUN, SLIDE — подкат, CRAWL — ползком, ROLL — перекат),
 ## в воздухе (JUMP, FALL, DASH, WALL_SLIDE), на опоре (HANG — вис на краю, CLIMB — подтягивание,
@@ -145,6 +147,19 @@ var last_fall := 0.0
 # Лестница.
 var _ladder: Ladder = null
 var _ladder_down_t := 0.0
+## Детектор в руке (или достаётся): скорость не выше шага, подката и рывка нет.
+var detector_out := false
+var _detector_draw_t := 0.0
+# Шум: последний сигнал (для круга в F1) и такт шагов.
+var last_noise_pos := Vector2.ZERO
+var last_noise_radius := 0.0
+var last_noise_msec := -100000
+var _step_t := 0.0
+# Камера: вертикаль с мёртвой зоной, смещение при падении, зум.
+var _cam_y := 0.0
+var _fall_look := 0.0
+var _zoom_target := 1.0
+var _zoom_tween: Tween
 
 
 func _ready() -> void:
@@ -159,9 +174,12 @@ func _ready() -> void:
 	add_child(_cs)
 	_fall_peak_y = global_position.y
 	_camera = Camera2D.new()
+	_camera.top_level = true  # положение камеры считаем сами: взгляд вперёд, мёртвая зона, падение
 	_camera.position_smoothing_enabled = true
 	_camera.position_smoothing_speed = m.cam_smoothing
 	add_child(_camera)
+	_cam_y = global_position.y + m.cam_offset_y
+	_camera.global_position = Vector2(global_position.x, _cam_y)
 	_camera.make_current()
 	inventory.base_weight = base_gear_weight
 	inventory.weight_changed.connect(_on_weight_changed)
@@ -198,7 +216,14 @@ func _physics_process(delta: float) -> void:
 		_coyote = m.coyote_time
 		_air_dash_used = false
 		_wall_jumps = 0
+	if not stunned and Input.is_action_just_pressed(&"az_detector"):
+		if detector_out:
+			_put_detector_away()
+		else:
+			_take_detector()
 	if not stunned and Input.is_action_just_pressed(&"az_jump"):
+		if detector_out:
+			_put_detector_away()  # Пробел мгновенно убирает детектор и прыгает
 		var plat := _floor_platform() if Input.is_action_pressed(&"az_down") else null
 		if plat and plat.one_way:
 			_drop_through(plat)  # вниз + прыжок на односторонней платформе — спрыгнуть
@@ -259,6 +284,7 @@ func _physics_process(delta: float) -> void:
 		_on_landed(global_position.y - _fall_peak_y, landing_speed)
 	_fall_peak_y = minf(_fall_peak_y, global_position.y)
 	_update_state()
+	_step_noise(delta)
 	if not stunned and not _crouched:
 		if is_on_floor():
 			if state in [MoveState.STAND, MoveState.RUN]:
@@ -268,11 +294,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
-	var want := facing * m.look_ahead if absf(velocity.x) > 30.0 else 0.0
-	_look = lerpf(_look, want, 1.0 - exp(-m.look_ahead_speed * delta))
-	_shake = maxf(0.0, _shake - m.shake_decay * delta)
-	var jitter := Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
-	_camera.offset = Vector2(_look, m.cam_offset_y) + jitter
+	_update_camera(delta)
 	modulate.a = 0.35 if _invuln > 0.0 and int(_invuln * 20.0) % 2 == 0 else 1.0
 	queue_redraw()
 
@@ -290,6 +312,7 @@ func _tick(delta: float) -> void:
 	_wall_coyote -= delta
 	_wj_lock_t -= delta
 	_regrab_cd -= delta
+	_detector_draw_t -= delta
 	_ledge_seen_t -= delta
 	_slide_cd -= delta
 	_roll_buf -= delta
@@ -315,7 +338,7 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 	if _wj_lock_t > 0.0 and dir != 0.0 and int(signf(dir)) == _wj_dir:
 		ctl *= m.wall_jump_control  # сразу после отскока к стене не тянет обратно
 	var on_floor := is_on_floor()
-	var target := dir * m.run_speed * slow
+	var target := dir * top_speed() * slow
 	var vx := velocity.x
 	var rate: float
 	if dir == 0.0:
@@ -377,6 +400,11 @@ func _vertical(delta: float, dir: float, boost: float) -> void:
 
 func _try_dash(dir: float) -> void:
 	if state in SUPPORT_STATES:
+		return
+	if detector_out:
+		if _no_dash_hint_t <= 0.0:
+			message.emit("Детектор в руке — рывка нет (X — убрать)")
+			_no_dash_hint_t = 3.0
 		return
 	if not m.allow_dash:
 		if (has_dash or charge > 0) and _no_dash_hint_t <= 0.0:
@@ -596,7 +624,7 @@ func _can_stand() -> bool:
 
 ## S на земле: на бегу — подкат, стоя или медленно — ползком.
 func _ground_down_actions() -> void:
-	if _down_edge and _slide_cd <= 0.0 and m.allow_slide \
+	if _down_edge and _slide_cd <= 0.0 and m.allow_slide and not detector_out \
 			and absf(velocity.x) >= m.run_speed * m.slide_min_speed:
 		_start_slide()
 	elif Input.is_action_pressed(&"az_down"):
@@ -608,6 +636,8 @@ func _start_slide() -> void:
 	_set_crouch(true)
 	var s := signf(velocity.x) if velocity.x != 0.0 else float(facing)
 	velocity.x = s * maxf(m.slide_speed, absf(velocity.x))
+	emit_noise(global_position + Vector2(0.0, body_size.y * 0.5), m.noise_slide)
+	_step_t = m.noise_step_interval
 	_slide_t = m.slide_time
 	_slide_cd = m.slide_time + m.slide_cooldown
 	change_state(MoveState.SLIDE)
@@ -662,6 +692,8 @@ func _state_crawl(delta: float, dir: float, slow: float, boost: float) -> void:
 ## Приземление с высоты h (от верхней точки полёта).
 func _on_landed(h: float, speed: float) -> void:
 	last_fall = h
+	if h > 4.0:
+		emit_noise(global_position + Vector2(0.0, body_size.y * 0.5), m.noise_land + m.noise_land_per_px * h)
 	var hurt := h > m.safe_fall_height and speed >= m.fall_damage_min_speed
 	if _roll_buf > 0.0:
 		_roll_buf = 0.0
@@ -670,7 +702,7 @@ func _on_landed(h: float, speed: float) -> void:
 			if hurt:
 				_fall_hurt(h, true)
 			return
-		if absf(velocity.x) >= m.run_speed * m.slide_min_speed and _slide_cd <= 0.0 and m.allow_slide:
+		if absf(velocity.x) >= m.run_speed * m.slide_min_speed and _slide_cd <= 0.0 and m.allow_slide and not detector_out:
 			_start_slide()  # невысоко: S перед касанием — сразу в подкат
 			return
 	if hurt:
@@ -809,6 +841,105 @@ func _release_ladder() -> void:
 			remove_collision_exception_with(_fall_through)
 		_fall_through = top
 		_fall_through_t = 0.15
+
+
+# --- Тихий шаг, детектор, шум ----------------------------------------------
+
+## Потолок скорости бега: тихий шаг (Ctrl) и детектор в руке — не быстрее шага.
+func top_speed() -> float:
+	if detector_out or Input.is_action_pressed(&"az_walk"):
+		return minf(m.run_speed, m.walk_speed)
+	return m.run_speed
+
+
+func is_walking() -> bool:
+	return absf(velocity.x) <= m.walk_speed + 1.0
+
+
+## X: достать детектор (detector_draw_time), он сразу ограничивает скорость.
+func _take_detector() -> void:
+	if state in SUPPORT_STATES:
+		return
+	detector_out = true
+	_detector_draw_t = m.detector_draw_time
+
+
+func _put_detector_away() -> void:
+	detector_out = false
+	_detector_draw_t = 0.0
+
+
+## Детектор уже в руке (а не достаётся).
+func detector_ready() -> bool:
+	return detector_out and _detector_draw_t <= 0.0
+
+
+func emit_noise(pos: Vector2, radius: float) -> void:
+	last_noise_pos = pos
+	last_noise_radius = radius
+	last_noise_msec = Time.get_ticks_msec()
+	noise_emitted.emit(pos, radius)
+
+
+## Шаги шумят раз в noise_step_interval: бег — noise_run, шаг и ползком — noise_walk, подкат — noise_slide.
+func _step_noise(delta: float) -> void:
+	if not is_on_floor() or absf(velocity.x) < 20.0 or state not in [MoveState.STAND, MoveState.RUN, MoveState.SLIDE,
+			MoveState.CRAWL, MoveState.ROLL]:
+		_step_t = 0.0
+		return
+	_step_t -= delta
+	if _step_t > 0.0:
+		return
+	_step_t = m.noise_step_interval
+	var r := m.noise_run
+	if state == MoveState.SLIDE:
+		r = m.noise_slide
+	elif state == MoveState.CRAWL or is_walking():
+		r = m.noise_walk
+	emit_noise(global_position + Vector2(0.0, body_size.y * 0.5), r)
+
+
+# --- Камера ----------------------------------------------------------------
+
+## Взгляд вперёд, мёртвая зона по вертикали, смещение вниз при быстром падении, зум у аномалий
+## и с детектором, тряска не больше shake_max.
+func _update_camera(delta: float) -> void:
+	var want := facing * m.look_ahead if absf(velocity.x) > 30.0 else 0.0
+	_look = move_toward(_look, want, m.look_ahead / m.look_ahead_time * delta)
+	var fall_want := m.fall_look if velocity.y > m.fall_look_speed else 0.0
+	_fall_look = move_toward(_fall_look, fall_want, m.fall_look / m.fall_look_time * delta)
+	var py := global_position.y + m.cam_offset_y
+	if py > _cam_y + m.dead_zone_y:
+		_cam_y = py - m.dead_zone_y
+	elif py < _cam_y - m.dead_zone_y:
+		_cam_y = py + m.dead_zone_y
+	elif is_on_floor():
+		_cam_y = move_toward(_cam_y, py, 60.0 * delta)  # стоя на земле — плавно к центру
+	_camera.global_position = Vector2(global_position.x + _look, _cam_y + _fall_look)
+	_shake = maxf(0.0, _shake - m.shake_decay * delta)
+	_camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
+	var z := 1.0
+	if in_anomaly_field():
+		z = m.zoom_field
+	if detector_out:
+		z = maxf(z, m.zoom_detector)
+	if not is_equal_approx(z, _zoom_target):
+		_zoom_target = z
+		if _zoom_tween:
+			_zoom_tween.kill()
+		_zoom_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		_zoom_tween.tween_property(_camera, "zoom", Vector2(z, z), m.zoom_time)
+
+
+func in_anomaly_field() -> bool:
+	for f in get_tree().get_nodes_in_group(&"anomaly_fields"):
+		if (f as AnomalyField).zone_rect().has_point(global_position):
+			return true
+	return false
+
+
+func camera_zoom() -> float:
+	return _camera.zoom.x
 
 
 func _state_dash() -> void:
@@ -1058,6 +1189,8 @@ func change_state(s: MoveState) -> void:
 		return
 	var from := state
 	state = s
+	if s in SUPPORT_STATES and detector_out:
+		_put_detector_away()  # вис, подтягивание и лестница — нужны обе руки
 	if from == MoveState.LADDER:
 		_release_ladder()
 	var line := "%.2f %s → %s" % [Time.get_ticks_msec() / 1000.0, STATE_NAMES[from], STATE_NAMES[s]]
@@ -1095,7 +1228,7 @@ func take_damage(amount: float, knock: Vector2 = Vector2.ZERO, ignore_invuln: bo
 		return false
 	_invuln = invuln_time
 	_set_hp(maxf(0.0, hp - amount))
-	shake(clampf(amount * 0.3, 3.0, 9.0))
+	shake(clampf(amount * 0.3, 2.0, m.shake_max))
 	if knock != Vector2.ZERO:
 		apply_impulse(knock.normalized() * hit_knockback, 0.25)
 	_check_death()
@@ -1130,8 +1263,9 @@ func is_dead() -> bool:
 	return _dead
 
 
+## Тряска камеры — только от урона и жёсткого приземления, не больше shake_max.
 func shake(strength: float) -> void:
-	_shake = maxf(_shake, strength)
+	_shake = maxf(_shake, minf(strength, m.shake_max))
 
 
 func respawn(pos: Vector2, full_heal: bool) -> void:
@@ -1152,6 +1286,11 @@ func respawn(pos: Vector2, full_heal: bool) -> void:
 	_invuln = 0.8
 	if full_heal:
 		_set_hp(max_hp)
+	_put_detector_away()
+	_cam_y = pos.y + m.cam_offset_y
+	_look = 0.0
+	_fall_look = 0.0
+	_camera.global_position = Vector2(pos.x, _cam_y)
 	_camera.reset_smoothing()
 
 
@@ -1178,3 +1317,12 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2(-half.x, top), Vector2(body_size.x, half.y - top)), col)
 	var eye_x := half.x - 12.0 if facing > 0 else -half.x + 2.0
 	draw_rect(Rect2(Vector2(eye_x, top + (5.0 if _crouched else 8.0)), Vector2(10.0, 5.0)), Color("15171c"))
+	if detector_out:
+		# Детектор в руке: коробка с антенной; пока достаётся — поднимается снизу.
+		var k := 1.0 - clampf(_detector_draw_t / m.detector_draw_time, 0.0, 1.0)
+		var hand := Vector2(facing * (half.x + 4.0), lerpf(half.y - 4.0, -4.0, k))
+		var dcol := Color("e0c068", 0.4 + 0.6 * k)
+		draw_rect(Rect2(hand - Vector2(5.0, 6.0), Vector2(10.0, 12.0)), dcol)
+		draw_line(hand + Vector2(0.0, -6.0), hand + Vector2(facing * 4.0, -14.0), dcol, 1.5)
+		if detector_ready():
+			draw_circle(hand + Vector2(0.0, -1.0), 2.0, Color("7dff8a"))

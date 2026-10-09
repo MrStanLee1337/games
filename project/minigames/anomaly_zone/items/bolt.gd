@@ -6,6 +6,7 @@ const LIFETIME := 5.0
 
 var _age := 0.0
 var _gone := false
+var _hit := false
 
 
 func _ready() -> void:
@@ -24,6 +25,19 @@ func _ready() -> void:
 	mass = 0.2
 	linear_damp = 0.15
 	continuous_cd = RigidBody2D.CCD_MODE_CAST_RAY
+	contact_monitor = true
+	max_contacts_reported = 1
+	body_entered.connect(_on_body_entered)
+
+
+## Первый удар болта шумит (игрок испускает сигнал шума за болт).
+func _on_body_entered(_b: Node) -> void:
+	if _hit:
+		return
+	_hit = true
+	var p := get_tree().get_first_node_in_group(&"player") as Player
+	if p:
+		p.emit_noise(global_position, p.m.noise_bolt)
 
 
 func _physics_process(delta: float) -> void:
