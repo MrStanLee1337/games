@@ -166,6 +166,11 @@ func _draw() -> void:
 	draw_rect(Rect2(o, PANEL), C_PANEL)
 	draw_rect(Rect2(o, PANEL), C_BORDER, false, 2.0)
 	draw_string(font, o + Vector2(40, 48), "Инвентарь", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	if _player:
+		var lost := _player.lost_move_names()
+		draw_string(font, o + Vector2(240, 48), "Груз %s кг — %s%s" % [ArtifactDb._num(snappedf(_player.load_kg, 0.1)),
+			MovementConfig.TIER_NAMES[_player.m.tier], "; нет: " + ", ".join(lost) if not lost.is_empty() else ""],
+			HORIZONTAL_ALIGNMENT_LEFT, 600, 16, ZoneHud.TIER_COLORS[_player.m.tier])
 	draw_string(font, o + Vector2(40, 112), "Рюкзак", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.7))
 	draw_string(font, o + Vector2(440, 112), "Пояс — действуют только артефакты отсюда", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.7))
 	for zone in [Inventory.Zone.BACKPACK, Inventory.Zone.BELT]:
@@ -204,6 +209,7 @@ func _draw_tooltip(it: ItemData) -> void:
 	var lines: Array[String] = []
 	if it.kind == ItemData.Kind.ARTIFACT:
 		lines = ArtifactDb.describe(it)
+	lines.append("Вес %s кг" % ArtifactDb._num(it.weight))
 	var desc_h := font.get_multiline_string_size(it.description, HORIZONTAL_ALIGNMENT_LEFT, w - pad * 2.0, 14).y
 	var h := pad * 2.0 + 24.0 + desc_h + lines.size() * 20.0 + (8.0 if not lines.is_empty() else 0.0)
 	var pos := get_local_mouse_position() + Vector2(18.0, 18.0)

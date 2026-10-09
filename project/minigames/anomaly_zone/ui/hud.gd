@@ -1,9 +1,17 @@
 class_name ZoneHud
 extends Control
-## HUD «Зоны». Пока: полоса HP, подсказка по клавишам (H), всплывающие сообщения.
+## HUD «Зоны»: полоса HP, пояс, груз с порогами и потерянными приёмами, подсказка по клавишам (H),
+## всплывающие сообщения.
 
 const HINTS := "A/D ← → — бег    Пробел/W — прыжок    Shift — рывок (Вспышка)    F — болт    E — подобрать    Q — лечение    1/2/3 — слот, G — бросить (S+G — положить)\nS — подкат/ползком/перекат    Tab — инвентарь    S+Пробел — спрыгнуть с платформы    R — чекпоинт    H — скрыть    F1 — отладка    F2 — артефакты    Esc — выход"
 const SLOT := 44.0
+const TIER_COLORS := [Color("5ad17a"), Color("f2c14e"), Color("ff8a2b"), Color("ef4f4f")]
+const MOVE_ORDER: Array[StringName] = [&"wall_jump", &"air_dash", &"slide", &"grab", &"dash"]
+const MOVE_SHORT := {
+	&"wall_jump": "отскок", &"air_dash": "рывок в возд.", &"slide": "подкат", &"grab": "зацеп", &"dash": "рывок",
+}
+## Сколько секунд мигает иконка приёма и подпись порога после перехода.
+const BLINK := 1.2
 
 var _inv: Inventory
 var _selected := 0
@@ -18,11 +26,18 @@ var _time := 0.0
 var _deaths := 0
 var _finish_text := ""
 var _finish_sub := ""
+var _player: Player
+var _lost: Array[StringName] = []
+## id приёма → сколько ещё мигать (потерян — красным, вернулся — зелёным).
+var _blink: Dictionary = {}
+var _tier := 0
+var _tier_blink := 0.0
 
 
 func _ready() -> void:
 	# Родитель — CanvasLayer, якоря не работают: раскладываем вручную по размеру окна.
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	set_process(false)
 	_hints = Label.new()
 	_hints.text = HINTS
 	_hints.add_theme_font_size_override("font_size", 15)
@@ -53,6 +68,41 @@ func _unhandled_input(event: InputEvent) -> void:
 func set_inventory(inv: Inventory) -> void:
 	_inv = inv
 	_inv.changed.connect(queue_redraw)
+	queue_redraw()
+
+
+func set_player(p: Player) -> void:
+	_player = p
+	_tier = p.m.tier
+	_lost = p.lost_moves()
+	p.load_changed.connect(_on_load_changed)
+	queue_redraw()
+
+
+func _on_load_changed(_kg: float, _eff: float, tier: MovementConfig.Tier) -> void:
+	var lost := _player.lost_moves()
+	for id in lost:
+		if id not in _lost:
+			_blink[id] = BLINK
+	for id in _lost:
+		if id not in lost:
+			_blink[id] = BLINK
+	if tier != _tier:
+		_tier_blink = BLINK
+	_tier = tier
+	_lost = lost
+	set_process(not _blink.is_empty() or _tier_blink > 0.0)
+	queue_redraw()
+
+
+func _process(delta: float) -> void:
+	for id in _blink.keys():
+		_blink[id] -= delta
+		if _blink[id] <= 0.0:
+			_blink.erase(id)
+	_tier_blink -= delta
+	if _blink.is_empty() and _tier_blink <= 0.0:
+		set_process(false)
 	queue_redraw()
 
 
@@ -108,6 +158,7 @@ func _draw() -> void:
 	draw_rect(Rect2(pos, Vector2(w * ratio, 18.0)), col)
 	draw_string(ThemeDB.fallback_font, pos + Vector2(6.0, 14.0), "HP %d" % int(ceilf(_hp)), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0, 0, 0, 0.85))
 	_draw_belt()
+	_draw_load()
 	var font := ThemeDB.fallback_font
 	var vp := get_viewport_rect().size
 	draw_string(font, Vector2(vp.x - 324.0, 40.0), "%s   Смертей: %d" % [_fmt_time(_time), _deaths], HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 20, Color(1, 1, 1, 0.8))
@@ -145,3 +196,75 @@ func _draw_belt() -> void:
 	var n := _inv.count_consumables()
 	if n > 0:
 		draw_string(font, Vector2(24.0, 52.0 + SLOT + 20.0), "Q — лечение (%d)" % n, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.7))
+
+
+## Полоса груза с отметками порогов; под ней — серые иконки приёмов, которые отнял груз.
+func _draw_load() -> void:
+	if _player == null or _player.m == null:
+		return
+	var m := _player.m
+	var font := ThemeDB.fallback_font
+	var pos := Vector2(24.0, 128.0)
+	var w := 260.0
+	var h := 8.0
+	var max_kg := m.load_over * 1.25
+	var col: Color = TIER_COLORS[m.tier]
+	draw_rect(Rect2(pos, Vector2(w, h)), Color(0, 0, 0, 0.5))
+	draw_rect(Rect2(pos, Vector2(w * clampf(_player.effective_load / max_kg, 0.0, 1.0), h)), col)
+	for kg in [m.load_medium, m.load_heavy, m.load_over]:
+		var x: float = pos.x + w * kg / max_kg
+		draw_line(Vector2(x, pos.y - 3.0), Vector2(x, pos.y + h + 3.0), Color(1, 1, 1, 0.7), 1.5)
+	var text := "Груз %s кг — %s" % [ArtifactDb._num(snappedf(_player.load_kg, 0.1)), MovementConfig.TIER_NAMES[m.tier]]
+	if not is_equal_approx(_player.effective_load, _player.load_kg):
+		text += " (ощущается %s)" % ArtifactDb._num(snappedf(_player.effective_load, 0.1))
+	var tcol := col
+	if _tier_blink > 0.0 and int(_tier_blink * 8.0) % 2 == 0:
+		tcol = Color.WHITE
+	draw_string(font, pos + Vector2(0.0, h + 17.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, tcol)
+	var x0 := pos.x + 15.0
+	for id in MOVE_ORDER:
+		var lost := id in _lost
+		if not lost and not _blink.has(id):
+			continue
+		var c := Vector2(x0, pos.y + 48.0)
+		var icol := Color(1, 1, 1, 0.4)
+		if _blink.has(id) and int(_blink[id] * 8.0) % 2 == 0:
+			icol = Color("ef6f6c") if lost else Color("5ad17a")
+		draw_rect(Rect2(c - Vector2(15.0, 15.0), Vector2(30.0, 30.0)), Color(0, 0, 0, 0.5))
+		_draw_move_icon(id, c, icol)
+		if lost:
+			draw_line(c + Vector2(-13.0, 13.0), c + Vector2(13.0, -13.0), Color("ef6f6c", 0.8), 2.0)
+		draw_string(font, c + Vector2(-15.0, 28.0), MOVE_SHORT[id], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, icol)
+		x0 += 84.0
+
+
+## Пиктограммы приёмов примитивами (поперечник ~20 px).
+func _draw_move_icon(id: StringName, c: Vector2, col: Color) -> void:
+	match id:
+		&"wall_jump":
+			draw_line(c + Vector2(-9.0, -10.0), c + Vector2(-9.0, 10.0), col, 3.0)
+			_arrow(c + Vector2(-5.0, 7.0), c + Vector2(8.0, -7.0), col)
+		&"air_dash":
+			_arrow(c + Vector2(-9.0, -3.0), c + Vector2(9.0, -3.0), col)
+			for k in 3:
+				draw_line(c + Vector2(-9.0 + k * 7.0, 8.0), c + Vector2(-6.0 + k * 7.0, 8.0), col, 1.5)
+		&"slide":
+			draw_rect(Rect2(c + Vector2(-4.0, 1.0), Vector2(13.0, 6.0)), col)
+			draw_line(c + Vector2(-10.0, 2.0), c + Vector2(-6.0, 2.0), col, 1.5)
+			draw_line(c + Vector2(-10.0, 6.0), c + Vector2(-6.0, 6.0), col, 1.5)
+			draw_line(c + Vector2(-10.0, 9.0), c + Vector2(10.0, 9.0), col, 1.5)
+		&"grab":
+			draw_line(c + Vector2(-1.0, -4.0), c + Vector2(10.0, -4.0), col, 2.5)
+			draw_line(c + Vector2(-1.0, -4.0), c + Vector2(-1.0, 10.0), col, 2.5)
+			draw_circle(c + Vector2(-5.0, -6.0), 3.5, col)
+			draw_line(c + Vector2(-5.0, -3.0), c + Vector2(-6.0, 8.0), col, 2.0)
+		&"dash":
+			_arrow(c + Vector2(-9.0, 0.0), c + Vector2(9.0, 0.0), col)
+			draw_line(c + Vector2(-10.0, 9.0), c + Vector2(10.0, 9.0), col, 1.5)
+
+
+func _arrow(a: Vector2, b: Vector2, col: Color) -> void:
+	draw_line(a, b, col, 2.5)
+	var d := (b - a).normalized()
+	var n := Vector2(-d.y, d.x)
+	draw_colored_polygon(PackedVector2Array([b + d * 3.0, b - d * 5.0 + n * 4.5, b - d * 5.0 - n * 4.5]), col)

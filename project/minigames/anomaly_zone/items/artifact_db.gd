@@ -11,7 +11,8 @@ extends RefCounted
 ##   passives: {jump_mult, gravity_mult, regen, grants_dash} — пассивные эффекты игроку.
 ##             jump_mult — множитель высоты прыжка; gravity_mult — гравитации при той же высоте
 ##             (прыжок дольше и дальше); grants_dash — даёт рывок (Shift).
-## Расходник: id, name, desc, color, shape, heal.
+##   weight:   вес, кг (артефакты 1–2.5). Груз = базовое снаряжение + веса пояса и рюкзака.
+## Расходник: id, name, desc, color, shape, heal, weight.
 
 const ANOMALY_NAMES := {
 	Anomaly.Type.ZHARKA: "Жарка",
@@ -33,6 +34,7 @@ const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id": &"kaplya", "name": "Капля",
 		"desc": "Холодная капля. Огонь рядом с ней превращается в пар, но вода хорошо проводит ток.",
+		"weight": 1.5,
 		"color": Color("5aa9ef"), "shape": ItemData.Shape.DROP,
 		"effects": [
 			{"type": Anomaly.Type.ZHARKA, "form": &"steam"},
@@ -43,6 +45,7 @@ const ARTIFACTS: Array[Dictionary] = [
 		"id": &"batareyka", "name": "Батарейка",
 		"desc": "Забирает разряды Электр в заряд. Shift с зарядом — усиленный рывок.
 Четвёртый заряд — перегрузка.",
+		"weight": 2.5,
 		"color": Color("f2c14e"), "shape": ItemData.Shape.SQUARE,
 		"effects": [
 			{"type": Anomaly.Type.ELECTRA, "form": &"battery"},
@@ -51,6 +54,7 @@ const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id": &"pruzhina", "name": "Пружина",
 		"desc": "Заставляет трамплины подбрасывать намного выше.",
+		"weight": 2.0,
 		"color": Color("9be564"), "shape": ItemData.Shape.DIAMOND,
 		"effects": [
 			{"type": Anomaly.Type.TRAMPLIN, "mult": 2.0},
@@ -60,6 +64,7 @@ const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id": &"gravi", "name": "Грави",
 		"desc": "Выворачивает притяжение наизнанку, а трамплины превращает в поле парения.",
+		"weight": 2.5,
 		"color": Color("a066ff"), "shape": ItemData.Shape.CIRCLE,
 		"effects": [
 			{"type": Anomaly.Type.VORONKA, "inverted": true},
@@ -70,6 +75,7 @@ const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id": &"vspyshka", "name": "Вспышка",
 		"desc": "Рождается в Электре. Даёт рывок (Shift), но Электры рядом злее.",
+		"weight": 1.0,
 		"color": Color("8fd3ff"), "shape": ItemData.Shape.BOLT,
 		"effects": [
 			{"type": Anomaly.Type.ELECTRA, "mult": 1.4},
@@ -79,6 +85,7 @@ const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id": &"meduza", "name": "Медуза",
 		"desc": "Холодец застывает в упругое желе: не жжёт и не липнет, а пружинит.",
+		"weight": 1.5,
 		"color": Color("ff7ad9"), "shape": ItemData.Shape.HEXAGON,
 		"effects": [
 			{"type": Anomaly.Type.KHOLODETS, "form": &"jelly"},
@@ -88,6 +95,7 @@ const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id": &"plamya", "name": "Пламя",
 		"desc": "Высушивает лужи, но раздувает огонь.",
+		"weight": 2.0,
 		"color": Color("ff8a2b"), "shape": ItemData.Shape.TRIANGLE,
 		"effects": [
 			{"type": Anomaly.Type.KHOLODETS, "mult": 0.0},
@@ -100,12 +108,12 @@ const CONSUMABLES: Array[Dictionary] = [
 	{
 		"id": &"aptechka", "name": "Аптечка",
 		"desc": "Восстанавливает 50 HP.",
-		"color": Color("ef4f4f"), "shape": ItemData.Shape.CROSS, "heal": 50.0,
+		"color": Color("ef4f4f"), "shape": ItemData.Shape.CROSS, "heal": 50.0, "weight": 0.5,
 	},
 	{
 		"id": &"bint", "name": "Бинт",
 		"desc": "Восстанавливает 20 HP.",
-		"color": Color("5aa9ef"), "shape": ItemData.Shape.BAR, "heal": 20.0,
+		"color": Color("5aa9ef"), "shape": ItemData.Shape.BAR, "heal": 20.0, "weight": 0.1,
 	},
 ]
 
@@ -168,6 +176,7 @@ static func _build(d: Dictionary, kind: ItemData.Kind) -> ItemData:
 	it.color = d["color"]
 	it.shape = d["shape"]
 	it.heal = d.get("heal", 0.0)
+	it.weight = d.get("weight", 0.0)
 	it.effects.assign(d.get("effects", []))
 	it.passives = d.get("passives", {})
 	return it

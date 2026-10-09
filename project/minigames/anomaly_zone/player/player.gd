@@ -13,6 +13,8 @@ signal message(text: String)
 signal slot_selected(idx: int)
 signal charge_changed(value: int, max_value: int)
 signal state_changed(from: MoveState, to: MoveState)
+## Груз или его порог изменились (после пересчёта параметров движения).
+signal load_changed(kg: float, effective_kg: float, tier: MovementConfig.Tier)
 
 ## Группы по схеме ТЗ: на земле (STAND, RUN, SLIDE — подкат, CRAWL — ползком, ROLL — перекат),
 ## в воздухе (JUMP, FALL, DASH, WALL_SLIDE), на опоре (HANG — вис на краю, CLIMB — подтягивание,
@@ -41,6 +43,8 @@ const CROUCH_STATES := [MoveState.SLIDE, MoveState.CRAWL, MoveState.ROLL]
 
 @export_group("Инвентарь")
 @export var belt_slots := 3
+## Базовое снаряжение, кг (детектор, фляга, контейнеры): входит в груз всегда.
+@export var base_gear_weight := 2.0
 
 @export_group("Заряд (Батарейка)")
 @export var max_charge := 3
@@ -55,6 +59,9 @@ var gravity_multiplier := 1.0
 var regen_per_sec := 0.0
 ## Рывок даёт только артефакт Вспышка (или заряд Батарейки — один рывок за заряд).
 var has_dash := false
+## Груз, кг, и эффективный груз (× гравитация пояса: с Грави 20 кг ощущаются как 15).
+var load_kg := 0.0
+var effective_load := 0.0
 
 ## Эффективные параметры движения: копия config с учётом пассивов. Только для чтения.
 var m: MovementConfig
@@ -156,6 +163,8 @@ func _ready() -> void:
 	_camera.position_smoothing_speed = m.cam_smoothing
 	add_child(_camera)
 	_camera.make_current()
+	inventory.base_weight = base_gear_weight
+	inventory.weight_changed.connect(_on_weight_changed)
 	inventory.setup(belt_slots)
 	var aura := BeltAura.new()
 	aura.radius = aura_radius
@@ -335,7 +344,7 @@ func _vertical(delta: float, dir: float, boost: float) -> void:
 		_coyote = 0.0
 		_jumping = true
 		_apex_ok = true
-	elif _buffer > 0.0 and not on_floor and _wall_coyote > 0.0 and _wall_jumps < m.wall_jumps_max:
+	elif _buffer > 0.0 and not on_floor and _wall_coyote > 0.0 and _wall_jumps < m.wall_jumps_max and m.allow_wall_jump:
 		# Отскок от стены (при скольжении или сразу после отрыва).
 		velocity = Vector2(-_wall_dir * m.wall_jump_out, -m.wall_jump_up)
 		_wall_jumps += 1
@@ -369,6 +378,11 @@ func _vertical(delta: float, dir: float, boost: float) -> void:
 func _try_dash(dir: float) -> void:
 	if state in SUPPORT_STATES:
 		return
+	if not m.allow_dash:
+		if (has_dash or charge > 0) and _no_dash_hint_t <= 0.0:
+			message.emit("Перегруз — рывка нет")
+			_no_dash_hint_t = 3.0
+		return
 	if not has_dash and charge <= 0:
 		if _no_dash_hint_t <= 0.0:
 			message.emit("Рывок — только с Вспышкой (или заряд Батарейки)")
@@ -377,7 +391,7 @@ func _try_dash(dir: float) -> void:
 	if _dash_cd > 0.0 or _dash_t > 0.0:
 		return
 	if not is_on_floor():
-		if _air_dash_used:
+		if _air_dash_used or not m.allow_air_dash:
 			return
 		_air_dash_used = true
 	_dash_dir = int(signf(dir)) if dir != 0.0 else facing
@@ -469,7 +483,7 @@ func _find_ledge(s: int) -> Dictionary:
 
 
 func _try_ledge_grab(dir: float) -> void:
-	if _regrab_cd > 0.0:
+	if _regrab_cd > 0.0 or not m.allow_grab:
 		return
 	var s := int(signf(dir)) if dir != 0.0 else int(signf(velocity.x))
 	if s == 0:
@@ -582,7 +596,7 @@ func _can_stand() -> bool:
 
 ## S на земле: на бегу — подкат, стоя или медленно — ползком.
 func _ground_down_actions() -> void:
-	if _down_edge and _slide_cd <= 0.0 \
+	if _down_edge and _slide_cd <= 0.0 and m.allow_slide \
 			and absf(velocity.x) >= m.run_speed * m.slide_min_speed:
 		_start_slide()
 	elif Input.is_action_pressed(&"az_down"):
@@ -656,7 +670,7 @@ func _on_landed(h: float, speed: float) -> void:
 			if hurt:
 				_fall_hurt(h, true)
 			return
-		if absf(velocity.x) >= m.run_speed * m.slide_min_speed and _slide_cd <= 0.0:
+		if absf(velocity.x) >= m.run_speed * m.slide_min_speed and _slide_cd <= 0.0 and m.allow_slide:
 			_start_slide()  # невысоко: S перед касанием — сразу в подкат
 			return
 	if hurt:
@@ -968,10 +982,53 @@ func set_passives(jump_mult: float, grav_mult: float, regen: float, dash: bool =
 	recompute_movement()
 
 
-## Эффективные параметры = конфиг × пассивы. Пересчёт при смене пояса, а не каждый кадр.
+## Эффективные параметры = конфиг × порог груза × пассивы пояса.
+## Пересчёт при смене пояса или груза, а не каждый кадр.
 func recompute_movement() -> void:
+	var old_tier: MovementConfig.Tier = m.tier if m else MovementConfig.Tier.LIGHT
 	m = config.duplicate() as MovementConfig
-	m.derive(jump_multiplier, gravity_multiplier)
+	effective_load = load_kg * gravity_multiplier
+	m.apply_tier(m.tier_for(effective_load))
+	m.derive(jump_multiplier * m.tier_jump_mult, gravity_multiplier)
+	if m.tier != old_tier and is_node_ready():
+		var lost := lost_move_names()
+		message.emit("Груз: %s%s" % [MovementConfig.TIER_NAMES[m.tier],
+			" — нет: " + ", ".join(lost) if not lost.is_empty() else ""])
+	load_changed.emit(load_kg, effective_load, m.tier)
+
+
+func _on_weight_changed(kg: float) -> void:
+	load_kg = kg
+	recompute_movement()
+
+
+## Приёмы, которые отнял груз: id для HUD.
+func lost_moves() -> Array[StringName]:
+	var out: Array[StringName] = []
+	if not m.allow_wall_jump:
+		out.append(&"wall_jump")
+	if not m.allow_air_dash:
+		out.append(&"air_dash")
+	if not m.allow_slide:
+		out.append(&"slide")
+	if not m.allow_grab:
+		out.append(&"grab")
+	if not m.allow_dash:
+		out.append(&"dash")
+	return out
+
+
+const MOVE_NAMES := {
+	&"wall_jump": "отскок от стены", &"air_dash": "рывок в воздухе", &"slide": "подкат",
+	&"grab": "зацеп", &"dash": "рывок",
+}
+
+
+func lost_move_names() -> Array[String]:
+	var out: Array[String] = []
+	for id in lost_moves():
+		out.append(MOVE_NAMES[id])
+	return out
 
 
 ## Гравитация с учётом пассивов; при падении — усиленная. Нужна аномалиям (пар, парение).

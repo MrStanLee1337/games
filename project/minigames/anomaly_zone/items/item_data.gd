@@ -13,6 +13,8 @@ enum Shape { CIRCLE, DIAMOND, TRIANGLE, SQUARE, HEXAGON, DROP, CROSS, BAR, BOLT 
 @export var shape: Shape = Shape.CIRCLE
 ## Расходник: сколько HP возвращает.
 @export var heal := 0.0
+## Вес, кг: из суммы весов складывается груз (пороги — в MovementConfig).
+@export var weight := 0.0
 ## Артефакт: влияние на аномалии в ауре. Элемент: {type, mult, inverted, damage_mult}.
 @export var effects: Array[Dictionary] = []
 ## Артефакт: пассивные эффекты игроку (jump_mult, gravity_mult, regen).

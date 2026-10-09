@@ -3,6 +3,8 @@ extends RefCounted
 ## Логика рюкзака (4×3) и пояса артефактов. Без UI: об изменениях сообщает сигналами.
 
 signal changed
+## Груз изменился (кг, вместе с базовым снаряжением).
+signal weight_changed(kg: float)
 signal item_added(item: ItemData, in_belt: bool)
 
 enum Zone { BACKPACK, BELT }
@@ -12,6 +14,32 @@ const BACKPACK_ROWS := 3
 
 var backpack: Array[ItemData] = []
 var belt: Array[ItemData] = []
+## Базовое снаряжение (детектор, фляга, контейнеры), кг. Болты ничего не весят.
+var base_weight := 2.0
+var _last_weight := -1.0
+
+
+func _init() -> void:
+	changed.connect(_check_weight)
+
+
+## Груз: базовое снаряжение + всё на поясе и в рюкзаке.
+func get_total_weight() -> float:
+	var kg := base_weight
+	for it in belt:
+		if it != null:
+			kg += it.weight
+	for it in backpack:
+		if it != null:
+			kg += it.weight
+	return kg
+
+
+func _check_weight() -> void:
+	var kg := get_total_weight()
+	if not is_equal_approx(kg, _last_weight):
+		_last_weight = kg
+		weight_changed.emit(kg)
 
 
 func setup(belt_slots: int) -> void:
