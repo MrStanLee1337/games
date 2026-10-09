@@ -117,10 +117,11 @@ func _draw() -> void:
 	draw_string(font, o + Vector2(440, 112), "Артефакты — действуют все сразу", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.7))
 	for i in _inv.backpack.size():
 		_draw_slot(i)
-	if _inv.artifacts.is_empty():
+	var arts := _player.stats.artifacts
+	if arts.is_empty():
 		draw_string(font, o + Vector2(440, 150), "пока нет", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 1, 1, 0.45))
-	for i in _inv.artifacts.size():
-		var it := _inv.artifacts[i]
+	for i in arts.size():
+		var it := arts[i]
 		var c := o + Vector2(460.0, 150.0 + i * 36.0)
 		it.draw_icon(self, c, 24.0)
 		draw_string(font, c + Vector2(24.0, 6.0), it.display_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, it.color.lightened(0.3))

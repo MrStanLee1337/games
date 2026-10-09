@@ -67,6 +67,20 @@ static func _build(d: Dictionary, kind: ItemData.Kind) -> ItemData:
 	it.shape = d["shape"]
 	it.heal = d.get("heal", 0.0)
 	it.aura = d.get("aura", {})
+	it.plus = d.get("plus", "")
+	it.minus = d.get("minus", "")
+	it.tag = d.get("tag", -1)
+	it.rarity = d.get("rarity", &"common")
+	it.damage_mult = d.get("damage_mult", {})
+	it.buff_mult = d.get("buff_mult", {})
+	it.buff_duration_mult = d.get("buff_duration_mult", {})
+	it.heal_mult = d.get("heal_mult", 1.0)
+	it.run_mult = d.get("run_mult", 1.0)
+	it.jump_mult = d.get("jump_mult", 1.0)
+	it.gravity_mult = d.get("gravity_mult", 1.0)
+	it.max_hp_add = d.get("max_hp_add", 0.0)
+	it.dash_charges_max = d.get("dash_charges_max", 0)
+	it.flags = d.get("flags", {})
 	return it
 
 

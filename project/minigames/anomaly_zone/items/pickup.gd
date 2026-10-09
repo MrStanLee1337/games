@@ -51,6 +51,11 @@ static func nearest_for_player(tree: SceneTree) -> Node2D:
 func collect(player: Player) -> bool:
 	if item == null:
 		return false
+	if item.kind == ItemData.Kind.ARTIFACT:
+		player.stats.add_artifact(item)
+		player.message.emit("Артефакт: " + item.display_name)
+		queue_free()
+		return true
 	if player.inventory.add_item(item):
 		queue_free()
 		return true

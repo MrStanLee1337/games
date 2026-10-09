@@ -37,7 +37,7 @@ func _draw() -> void:
 		draw_rect((f as AnomalyField).zone_rect(), Color(0.6, 0.8, 1.0, 0.25), false, 1.0)
 	var pc := player.global_position
 	var arts: Array[String] = []
-	for it in player.inventory.artifacts:
+	for it in player.stats.artifacts:
 		arts.append(it.display_name)
 	var jp := player.predicted_jump()
 	var lines: Array[String] = [
@@ -48,11 +48,27 @@ func _draw() -> void:
 		"расчёт прыжка: высота %d, дальность %d px" % [int(jp.x), int(jp.y)],
 		"зум %.2f" % player.camera_zoom(),
 		"последнее падение %d px (без урона до %d)" % [int(player.last_fall), int(player.m.safe_fall_height)],
+		"бег %d  макс. HP %d  баффы: %s" % [int(player.m.run_speed), int(player.max_hp), _buffs_text()],
+		"баффов по типам: %s" % _counts_text(),
 	]
 	for i in lines.size():
-		_text(font, pc + Vector2(-70.0, -168.0 + i * 15.0), lines[i])
+		_text(font, pc + Vector2(-70.0, -198.0 + i * 15.0), lines[i])
 	for i in player.state_log.size():
-		_text(font, pc + Vector2(250.0, -168.0 + i * 15.0), player.state_log[i])
+		_text(font, pc + Vector2(250.0, -198.0 + i * 15.0), player.state_log[i])
+
+
+func _buffs_text() -> String:
+	var parts: Array[String] = []
+	for id in player.buffs.active:
+		parts.append("%s ×%.2f %.1f с" % [AnomalyDb.BUFFS[id]["name"], player.buffs.strength(id), player.buffs.time_left(id)])
+	return ", ".join(parts) if not parts.is_empty() else "нет"
+
+
+func _counts_text() -> String:
+	var parts: Array[String] = []
+	for t in player.stats.buff_counts:
+		parts.append("%s %d" % [ArtifactDb.ANOMALY_NAMES[t], player.stats.buff_counts[t]])
+	return ", ".join(parts) if not parts.is_empty() else "нет"
 
 
 func _text(font: Font, pos: Vector2, text: String) -> void:

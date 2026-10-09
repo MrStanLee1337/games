@@ -14,7 +14,7 @@ func _ready() -> void:
 	_player = get_parent() as Player
 	z_index = 5
 	add_to_group(&"aura_sources")
-	_player.inventory.changed.connect(_on_inventory_changed)
+	_player.stats.changed.connect(_on_artifacts_changed)
 
 
 func aura_origin() -> Vector2:
@@ -23,7 +23,7 @@ func aura_origin() -> Vector2:
 
 func aura_items() -> Array[ItemData]:
 	var out: Array[ItemData] = []
-	for it in _player.inventory.artifacts:
+	for it in _player.stats.artifacts:
 		if not it.aura.is_empty():
 			out.append(it)
 	return out
@@ -41,7 +41,7 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
-func _on_inventory_changed() -> void:
+func _on_artifacts_changed() -> void:
 	if is_inside_tree():
 		get_tree().call_group(&"aura_system", &"refresh")
 

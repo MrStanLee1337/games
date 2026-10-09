@@ -1,7 +1,7 @@
 class_name Inventory
 extends RefCounted
-## Рюкзак (4×3) для расходников и список взятых артефактов. Без UI: об изменениях сообщает сигналами.
-## Пояса и слотов для артефактов нет: все взятые артефакты действуют сразу, выбросить их нельзя.
+## Рюкзак (4×3) для расходников. Без UI: об изменениях сообщает сигналами.
+## Артефакты в рюкзак не кладутся: они в PlayerStats (действуют все сразу, выбросить нельзя).
 
 signal changed
 signal item_added(item: ItemData)
@@ -10,13 +10,11 @@ const BACKPACK_COLS := 4
 const BACKPACK_ROWS := 3
 
 var backpack: Array[ItemData] = []
-var artifacts: Array[ItemData] = []
 
 
 func setup() -> void:
 	backpack.clear()
 	backpack.resize(BACKPACK_COLS * BACKPACK_ROWS)
-	artifacts.clear()
 	changed.emit()
 
 
@@ -24,15 +22,12 @@ func get_item(idx: int) -> ItemData:
 	return backpack[idx] if idx >= 0 and idx < backpack.size() else null
 
 
-## Артефакт — в список (без ограничения), расходник — в свободную клетку рюкзака.
+## Расходник — в свободную клетку рюкзака.
 func add_item(item: ItemData) -> bool:
-	if item.kind == ItemData.Kind.ARTIFACT:
-		artifacts.append(item)
-	else:
-		var i := backpack.find(null)
-		if i < 0:
-			return false
-		backpack[i] = item
+	var i := backpack.find(null)
+	if i < 0:
+		return false
+	backpack[i] = item
 	item_added.emit(item)
 	changed.emit()
 	return true
@@ -72,9 +67,6 @@ func best_heal_slot(missing: float) -> int:
 
 
 func has_id(id: StringName) -> bool:
-	for it in artifacts:
-		if it.id == id:
-			return true
 	for it in backpack:
 		if it != null and it.id == id:
 			return true

@@ -28,14 +28,17 @@ const CROUCH_STATES := [MoveState.SLIDE, MoveState.CRAWL, MoveState.ROLL]
 @export var config: MovementConfig = preload("res://minigames/anomaly_zone/player/movement_default.tres")
 
 @export_group("Здоровье")
-@export var max_hp := 100.0
 @export var invuln_time := 0.6
 @export var hit_knockback := 260.0
 
-@export_group("Заряды рывка")
-@export var max_charge := 2
-
-# Множители движения от артефактов (этап 5) и баффов (этап 2); пересчёт — recompute_movement().
+## Статы забега (артефакты, счётчик баффов) и активные баффы.
+var stats := PlayerStats.new()
+var buffs := Buffs.new()
+## Пределы из статов: макс. HP (с артефактами) и зарядов рывка.
+var max_hp := PlayerStats.BASE_MAX_HP
+var max_charge := PlayerStats.BASE_CHARGES
+# Итоговые множители движения (артефакты × баффы); пересчёт — recompute_movement().
+var run_multiplier := 1.0
 var jump_multiplier := 1.0
 var gravity_multiplier := 1.0
 
@@ -142,6 +145,8 @@ func _ready() -> void:
 	_camera.global_position = Vector2(global_position.x, _cam_y)
 	_camera.make_current()
 	inventory.setup()
+	stats.changed.connect(_on_stats_changed)
+	buffs.changed.connect(recompute_movement)
 	add_child(PlayerAura.new())
 	hp = max_hp
 	health_changed.emit(hp, max_hp)
@@ -250,6 +255,7 @@ func _tick(delta: float) -> void:
 	_wall_coyote -= delta
 	_wj_lock_t -= delta
 	_regrab_cd -= delta
+	buffs.tick(delta)
 	_ledge_seen_t -= delta
 	_slide_cd -= delta
 	_roll_buf -= delta
@@ -918,11 +924,29 @@ func set_move_multiplier(m: float) -> void:
 
 # --- Параметры движения и состояния ---------------------------------------
 
-## Эффективные параметры = конфиг × множители артефактов и баффов.
-## Пересчёт при смене набора, а не каждый кадр.
+## Эффективные параметры = конфиг × множители артефактов × активные баффы.
+## Пересчёт при смене артефактов, баффов или HP (Колючка), а не каждый кадр.
 func recompute_movement() -> void:
+	run_multiplier = stats.run_mult() * buffs.strength(&"forsazh") * _hp_speed_mult()
+	jump_multiplier = stats.jump_mult() * buffs.strength(&"legkost")
+	gravity_multiplier = stats.gravity_mult()
 	m = config.duplicate() as MovementConfig
-	m.derive(jump_multiplier, gravity_multiplier)
+	m.derive(jump_multiplier, gravity_multiplier, run_multiplier)
+
+
+## Колючка: бег × (1 + k · (1 − HP / HPмакс)) — чем меньше HP, тем быстрее.
+func _hp_speed_mult() -> float:
+	var k: float = stats.flag(&"hp_speed", 0.0)
+	return 1.0 + k * (1.0 - clampf(hp / maxf(1.0, max_hp), 0.0, 1.0))
+
+
+## Артефакты изменились: пределы HP и зарядов, движение.
+func _on_stats_changed() -> void:
+	max_hp = stats.max_hp()
+	max_charge = stats.max_charges()
+	_set_hp(minf(hp, max_hp))
+	_set_charge(charge)
+	recompute_movement()
 
 
 ## Гравитация с учётом множителей; при падении — усиленная.
@@ -1054,14 +1078,19 @@ func respawn(pos: Vector2, full_heal: bool) -> void:
 	_camera.reset_smoothing()
 
 
-## Новый забег: инвентарь, заряды и множители — с нуля, полное здоровье.
+## Новый забег: артефакты, расходники, заряды и баффы — с нуля, полное здоровье.
 func reset_run(pos: Vector2) -> void:
 	inventory.setup()
-	jump_multiplier = 1.0
-	gravity_multiplier = 1.0
-	recompute_movement()
+	buffs.clear()
+	stats.reset()
 	_set_charge(0)
 	respawn(pos, true)
+
+
+## Новый участок: HP, артефакты и заряды сохраняются, баффы сбрасываются.
+func start_section(pos: Vector2) -> void:
+	buffs.clear()
+	respawn(pos, false)
 
 
 func set_camera_limits(r: Rect2) -> void:
@@ -1074,6 +1103,8 @@ func set_camera_limits(r: Rect2) -> void:
 func _set_hp(v: float) -> void:
 	hp = v
 	health_changed.emit(hp, max_hp)
+	if stats.flag(&"hp_speed") != null:
+		recompute_movement()
 
 
 func _draw() -> void:

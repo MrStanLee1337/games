@@ -58,6 +58,7 @@ func _ready() -> void:
 	inv_layer.add_child(inv_window)
 	inv_window.setup(player.inventory, player)
 	hud.set_inventory(player.inventory)
+	hud.set_player(player)
 	player.message.connect(hud.show_message)
 	player.charge_changed.connect(hud.set_charge)
 	player.inventory.item_added.connect(_on_item_added)
@@ -137,8 +138,8 @@ func _give_all_artifacts() -> void:
 		return
 	var added := 0
 	for id in ArtifactDb.artifact_ids():
-		if not player.inventory.has_id(id):
-			player.inventory.add_item(ArtifactDb.make(id))
+		if not player.stats.has_artifact(id):
+			player.stats.add_artifact(ArtifactDb.make(id))
 			added += 1
 	hud.show_message("Выданы все артефакты" if added > 0 else "Все артефакты уже есть")
 
@@ -152,7 +153,7 @@ func _on_finish() -> void:
 		return
 	_finished = true
 	var arts: Array[String] = []
-	for it in player.inventory.artifacts:
+	for it in player.stats.artifacts:
 		arts.append(it.display_name)
 	hud.show_finish(_time, player.hp, arts)
 	finish(true, {"time": _time, "hp": player.hp, "artifacts": arts})

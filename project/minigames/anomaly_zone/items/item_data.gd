@@ -16,6 +16,29 @@ enum Shape { CIRCLE, DIAMOND, TRIANGLE, SQUARE, HEXAGON, DROP, CROSS, BAR, BOLT 
 ## Артефакт: аура вокруг игрока, меняющая аномалии рядом ({type, radius, ...}; пусто — без ауры).
 @export var aura: Dictionary = {}
 
+@export_group("Артефакт забега")
+## Плюс и минус текстом (карта тайника, экран билда).
+@export var plus := ""
+@export var minus := ""
+## Тег для карты «под билд»: тип аномалии (Anomaly.Type) или -1 — универсальный.
+@export var tag := -1
+## &"common" или &"rare".
+@export var rarity: StringName = &"common"
+## По типу аномалии: множитель урона, силы баффа и длительности баффа ({Anomaly.Type: float}).
+@export var damage_mult: Dictionary = {}
+@export var buff_mult: Dictionary = {}
+@export var buff_duration_mult: Dictionary = {}
+## Лечение Холодца, бег, высота прыжка, гравитация — множители; макс. HP — добавка.
+@export var heal_mult := 1.0
+@export var run_mult := 1.0
+@export var jump_mult := 1.0
+@export var gravity_mult := 1.0
+@export var max_hp_add := 0.0
+## Предел зарядов рывка (0 — не меняет).
+@export var dash_charges_max := 0
+## Уникальные правила (обрабатывает игрок): hp_speed, bengal, no_stun.
+@export var flags: Dictionary = {}
+
 
 ## Рисует иконку предмета в точке c; size — поперечник.
 func draw_icon(ci: CanvasItem, c: Vector2, size: float) -> void:

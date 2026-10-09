@@ -174,8 +174,9 @@ func fall_damage(h: float) -> float:
 
 ## Пересчёт выводимых величин с множителями артефактов и баффов.
 ## jump_mult умножает высоту прыжка; gravity_mult — гравитацию при той же высоте
-## (прыжок становится дольше и дальше, как у Грави).
-func derive(jump_mult: float, gravity_mult: float) -> void:
+## (прыжок становится дольше и дальше, как у Грави); run_mult — скорость бега.
+func derive(jump_mult: float, gravity_mult: float, run_mult: float = 1.0) -> void:
+	run_speed *= run_mult
 	var g_up := 2.0 * jump_height / (jump_time_to_apex * jump_time_to_apex)
 	gravity = g_up * gravity_mult
 	jump_velocity = sqrt(2.0 * gravity * jump_height * jump_mult)
