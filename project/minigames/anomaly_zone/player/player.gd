@@ -1127,6 +1127,14 @@ func _check_death() -> void:
 		died.emit()
 
 
+## Смерть сразу, без учёта HP (волна Выброса).
+func die_now() -> void:
+	if _dead:
+		return
+	_set_hp(0.0)
+	_check_death()
+
+
 func heal(amount: float) -> void:
 	_set_hp(minf(max_hp, hp + amount))
 

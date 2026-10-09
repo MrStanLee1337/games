@@ -25,6 +25,7 @@ const STASH_DROP := 140.0
 
 func _build() -> void:
 	bounds = Rect2(-3300.0, -300.0, 13300.0, 1300.0)
+	wave_speed = 220.0  # временная трасса: волна для ручной проверки (участки по ТЗ — этапы 7–8)
 	_training()
 	_warmup()
 	_zharka()

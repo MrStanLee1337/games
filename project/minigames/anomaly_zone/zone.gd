@@ -1,5 +1,5 @@
 extends "res://core/minigame.gd"
-## Корень мини-игры «Зона: забег»: собирает уровень, игрока и HUD, ведёт забег от А до Б.
+## Корень мини-игры «Зона: забег»: собирает уровень, игрока, волну Выброса и HUD, ведёт забег от А до Б.
 ## Чекпоинтов нет: смерть и R начинают забег заново — уровень строится с нуля,
 ## артефакты, расходники и заряды теряются. Яма — урон и возврат на последнее твёрдое место.
 
@@ -19,6 +19,7 @@ var level: ZoneLevel
 var hud: ZoneHud
 var inv_window: InventoryWindow
 var overlay: DebugOverlay
+var wave: BlowoutWave
 ## Номер попытки (забега) с запуска игры.
 var attempt := 1
 
@@ -42,6 +43,10 @@ func _ready() -> void:
 	player = Player.new()
 	world.add_child(player)
 	_build_level()
+	wave = BlowoutWave.new()
+	wave.player = player
+	wave.caught.connect(_on_wave_caught)
+	world.add_child(wave)
 	world.add_child(AuraSystem.new())
 	world.add_child(AnomalyInteractions.new())
 	overlay = DebugOverlay.new()
@@ -73,6 +78,10 @@ func _process(delta: float) -> void:
 	if not _finished and not _restarting:
 		_time += delta
 	hud.set_time(_time, attempt)
+	var screen_w := get_viewport().get_visible_rect().size.x / maxf(0.1, player.camera_zoom())
+	var dist := player.global_position.x - wave.x
+	hud.set_path(level.start_pos.x, level.finish_x(), player.global_position.x, wave.x, wave.gap_seconds(),
+		wave.is_running(), clampf(1.0 - dist / screen_w, 0.0, 1.0) if wave.is_running() else 0.0)
 
 
 func _physics_process(delta: float) -> void:
@@ -97,6 +106,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		overlay.visible = not overlay.visible
 	elif event.is_action_pressed(&"az_give_all"):
 		_give_all_artifacts()
+	elif event.is_action_pressed(&"az_wave_toggle"):
+		wave.enabled = not wave.enabled
+		hud.show_message("Волна " + ("включена" if wave.enabled else "выключена (F3)"))
 	elif event.is_action_pressed(&"az_exit"):
 		finish(false)
 		# Хаба пока нет: при отдельном запуске Esc закрывает игру.
@@ -128,6 +140,7 @@ func _begin_run() -> void:
 	_safe_pos = level.start_pos + Vector2(0.0, -player.body_size.y * 0.5 - 1.0)
 	player.set_camera_limits(level.bounds)
 	player.reset_run(_safe_pos)
+	wave.start(level.start_pos.x, level.wave_speed, level.bounds)
 	hud.hide_finish()
 
 
@@ -152,6 +165,7 @@ func _on_finish() -> void:
 	if _finished:
 		return
 	_finished = true
+	wave.stop()
 	var arts: Array[String] = []
 	for it in player.stats.artifacts:
 		arts.append(it.display_name)
@@ -159,11 +173,21 @@ func _on_finish() -> void:
 	finish(true, {"time": _time, "hp": player.hp, "artifacts": arts})
 
 
+## Волна догнала — смерть сразу, без учёта HP.
+func _on_wave_caught() -> void:
+	if _restarting or _finished:
+		return
+	hud.show_message("Догнала волна — забег сначала")
+	player.die_now()
+
+
 func _on_player_died() -> void:
 	if _restarting:
 		return
 	_restarting = true
+	wave.stop()
 	player.visible = false
-	hud.show_message("Забег провален — сначала")
+	if player.hp > 0.0 or wave.gap_seconds() > 0.0:
+		hud.show_message("Забег провален — сначала")
 	await get_tree().create_timer(RESTART_DELAY).timeout
 	restart_run()

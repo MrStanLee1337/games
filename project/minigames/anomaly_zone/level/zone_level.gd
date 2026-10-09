@@ -11,6 +11,9 @@ var bounds := Rect2(-200.0, -300.0, 8600.0, 1300.0)
 var fall_y := 960.0
 ## Точка А: старт забега (на полу, ноги игрока).
 var start_pos := Vector2.ZERO
+## Скорость волны Выброса на этом участке, px/с (0 — без волны). Считает бот:
+## v = (xБ − xА + 480) / (1.1 · T_safe), T_safe — время безопасной дороги.
+var wave_speed := 0.0
 var finish_sign: FinishSign
 
 
@@ -32,6 +35,11 @@ func _add_anomaly_fields() -> void:
 
 func _build() -> void:
 	pass
+
+
+## x точки Б (финиш или укрытие участка).
+func finish_x() -> float:
+	return finish_sign.global_position.x if finish_sign else bounds.end.x
 
 
 func _finish_at(x: float) -> void:

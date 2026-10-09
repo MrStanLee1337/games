@@ -18,6 +18,9 @@ var _time := 0.0
 var _attempt := 1
 var _finish_text := ""
 var _finish_lines: Array[String] = []
+# Полоса пути от А до Б: координаты, отрыв от волны (с), идёт ли волна, близость волны 0..1.
+var _path := {"a": 0.0, "b": 1.0, "player": 0.0, "wave": 0.0, "gap": INF, "running": false, "danger": 0.0}
+var _section_label := ""
 
 
 func _ready() -> void:
@@ -65,6 +68,16 @@ func set_player(p: Player) -> void:
 func _process(_delta: float) -> void:
 	if _player and not _player.buffs.active.is_empty():
 		queue_redraw()  # круговые таймеры баффов
+
+
+func set_path(a: float, b: float, player_x: float, wave_x: float, gap: float, running: bool, danger: float) -> void:
+	_path = {"a": a, "b": b, "player": player_x, "wave": wave_x, "gap": gap, "running": running, "danger": danger}
+	queue_redraw()
+
+
+func set_section_label(text: String) -> void:
+	_section_label = text
+	queue_redraw()
 
 
 func set_time(t: float, attempt: int) -> void:
@@ -116,6 +129,8 @@ func show_message(text: String) -> void:
 
 func _draw() -> void:
 	var font := ThemeDB.fallback_font
+	_draw_danger()
+	_draw_path()
 	var pos := Vector2(24.0, 24.0)
 	var w := 260.0
 	draw_rect(Rect2(pos, Vector2(w, 18.0)), Color(0, 0, 0, 0.5))
@@ -162,8 +177,8 @@ func _draw_buffs(start: Vector2) -> void:
 		AnomalyDb.draw_type_icon(self, info.get("type", -1), c, 9.0, col)
 		var frac := _player.buffs.fraction(id)
 		draw_arc(c, 19.0, -PI / 2.0, -PI / 2.0 + TAU * frac, 32, col, 3.0)
-		draw_string(font, c + Vector2(-30.0, 34.0), "%s %.1f" % [info.get("name", String(id)), _player.buffs.time_left(id)],
-			HORIZONTAL_ALIGNMENT_CENTER, 60.0, 11, Color(col, 0.9))
+		draw_string(font, c + Vector2(-32.0, 34.0), String(info.get("name", String(id))),
+			HORIZONTAL_ALIGNMENT_CENTER, 64.0, 11, Color(col, 0.9))
 		c.x += 64.0
 
 
@@ -178,3 +193,44 @@ func _draw_artifacts(start: Vector2) -> void:
 		c.x += 30.0
 	draw_string(ThemeDB.fallback_font, Vector2(c.x - 4.0, start.y + 5.0), "Tab — билд", HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
 		Color(1, 1, 1, 0.45))
+
+
+## Волна ближе ширины экрана — левый край краснеет, чем ближе, тем сильнее.
+func _draw_danger() -> void:
+	var d: float = _path["danger"]
+	if d <= 0.0:
+		return
+	var vp := get_viewport_rect().size
+	var w := 60.0 + 260.0 * d
+	var cols := PackedColorArray([Color(0.8, 0.05, 0.05, 0.75 * d), Color(0.8, 0.05, 0.05, 0.0),
+		Color(0.8, 0.05, 0.05, 0.0), Color(0.8, 0.05, 0.05, 0.75 * d)])
+	draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(w, 0.0), Vector2(w, vp.y), Vector2(0.0, vp.y)]), cols)
+
+
+## Полоса пути от А до Б сверху по центру: маркеры игрока и волны, отрыв в секундах.
+func _draw_path() -> void:
+	var font := ThemeDB.fallback_font
+	var vp := get_viewport_rect().size
+	var w := 420.0
+	var x0 := (vp.x - w) * 0.5
+	var y := 30.0
+	var a: float = _path["a"]
+	var b: float = maxf(_path["b"], a + 1.0)
+	draw_line(Vector2(x0, y), Vector2(x0 + w, y), Color(1, 1, 1, 0.35), 4.0)
+	draw_string(font, Vector2(x0 - 22.0, y + 5.0), "А", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.7))
+	draw_string(font, Vector2(x0 + w + 8.0, y + 5.0), "Б", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.7))
+	var px := x0 + w * clampf((_path["player"] - a) / (b - a), 0.0, 1.0)
+	if _path["running"]:
+		var wx := x0 + w * clampf((_path["wave"] - a) / (b - a), 0.0, 1.0)
+		draw_line(Vector2(x0, y), Vector2(wx, y), Color(0.85, 0.15, 0.1, 0.9), 4.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(wx, y - 9.0), Vector2(wx + 6.0, y), Vector2(wx, y + 9.0),
+			Vector2(wx - 4.0, y)]), Color("ff4a3a"))
+	draw_colored_polygon(PackedVector2Array([Vector2(px - 6.0, y - 12.0), Vector2(px + 6.0, y - 12.0), Vector2(px, y - 3.0)]),
+		Color.WHITE)
+	var txt := _section_label
+	if _path["running"]:
+		var gap: float = _path["gap"]
+		txt += ("   " if txt != "" else "") + "отрыв %.1f с" % gap
+	if txt != "":
+		var col := Color(1, 1, 1, 0.75) if _path["gap"] > 3.0 or not _path["running"] else Color("ff7a6a")
+		draw_string(font, Vector2(x0, y + 24.0), txt, HORIZONTAL_ALIGNMENT_CENTER, w, 14, col)
