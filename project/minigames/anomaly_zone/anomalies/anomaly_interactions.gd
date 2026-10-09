@@ -2,8 +2,7 @@ class_name AnomalyInteractions
 extends Node2D
 ## Взаимодействия аномалий друг с другом. Аномалии друг о друге не знают: ~10 раз в секунду
 ## эта система находит пары по правилам из RULES и вызывает у них методы (add_dryness,
-## set_flame_pull, set_fire, electrify). Сила связи растёт с интенсивностью, поэтому
-## артефакты, меняя интенсивность, включают и выключают связи.
+## set_flame_pull, set_fire, electrify). Сила связи растёт с интенсивностью аномалий.
 ## Рисует пунктир между связанными аномалиями и вспышку тока по луже.
 
 const RULES := {
@@ -14,7 +13,7 @@ const RULES := {
 	## урон share × урон разряда и оглушение всем, кто стоит в луже.
 	&"current": {"reach": 6.0, "share": 0.8, "color": Color("6fd6ff")},
 	## Воронка затягивает пламя Жарки, если Жарка в её радиусе: столб отклоняется к ядру
-	## на bend × ширину × min(1, 0.6 × I Воронки), инверсия (Грави) отбрасывает огонь прочь.
+	## на bend × ширину × min(1, 0.6 × I Воронки).
 	## Пока Жарка горит, вокруг ядра крутится огненный смерч.
 	&"draft": {"bend": 1.3, "color": Color("ff6a3d")},
 }
@@ -73,7 +72,7 @@ func _update(dt: float) -> void:
 			continue
 		var reach: float = heat["reach"] * z.current_intensity
 		for k in pools:
-			if k.dried or k.form == &"jelly" or Anomaly.rect_gap(z.world_bounds(), k.world_bounds()) > reach:
+			if k.dried or Anomaly.rect_gap(z.world_bounds(), k.world_bounds()) > reach:
 				continue
 			k.add_dryness(heat["rate"] * z.current_intensity * dt)
 			_links.append({"a": z, "b": k, "color": heat["color"]})
@@ -81,10 +80,10 @@ func _update(dt: float) -> void:
 	# Ток: Электра касается лужи (сам разряд — в on_discharge).
 	var current: Dictionary = RULES[&"current"]
 	for e in electras:
-		if e.is_asleep() or e.form == &"battery":
+		if e.is_asleep():
 			continue
 		for k in pools:
-			if not k.is_asleep() and k.form != &"jelly" and Anomaly.rect_gap(e.world_bounds(), k.world_bounds()) <= current["reach"]:
+			if not k.is_asleep() and Anomaly.rect_gap(e.world_bounds(), k.world_bounds()) <= current["reach"]:
 				_links.append({"a": e, "b": k, "color": Color(current["color"], 0.5)})
 
 	# Тяга: Воронка затягивает пламя Жарки.
@@ -98,8 +97,6 @@ func _update(dt: float) -> void:
 			if v.global_position.distance_to(z.visual_center()) > v.radius * v.scale_factor():
 				continue
 			var side := signf(v.global_position.x - z.global_position.x)
-			if v.inverted:
-				side = -side
 			dx += side * z.size.x * z.scale_factor() * draft["bend"] * minf(1.0, 0.6 * v.current_intensity)
 			_links.append({"a": v, "b": z, "color": draft["color"]})
 			if z.state == Anomaly.State.ACTIVE and not z.is_asleep():
@@ -111,8 +108,6 @@ func _update(dt: float) -> void:
 
 ## Электра разрядилась: если она касается лужи, ток проходит по всей луже.
 func on_discharge(e: Electra) -> void:
-	if e.form == &"battery":
-		return  # разряд ушёл в Батарейку
 	var current: Dictionary = RULES[&"current"]
 	for n in get_tree().get_nodes_in_group(&"anomalies"):
 		var k := n as Kholodets

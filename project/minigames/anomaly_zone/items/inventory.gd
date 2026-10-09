@@ -1,133 +1,64 @@
 class_name Inventory
 extends RefCounted
-## Логика рюкзака (4×3) и пояса артефактов. Без UI: об изменениях сообщает сигналами.
+## Рюкзак (4×3) для расходников и список взятых артефактов. Без UI: об изменениях сообщает сигналами.
+## Пояса и слотов для артефактов нет: все взятые артефакты действуют сразу, выбросить их нельзя.
 
 signal changed
-## Груз изменился (кг, вместе с базовым снаряжением).
-signal weight_changed(kg: float)
-signal item_added(item: ItemData, in_belt: bool)
-
-enum Zone { BACKPACK, BELT }
+signal item_added(item: ItemData)
 
 const BACKPACK_COLS := 4
 const BACKPACK_ROWS := 3
 
 var backpack: Array[ItemData] = []
-var belt: Array[ItemData] = []
-## Базовое снаряжение (детектор, фляга, контейнеры), кг. Болты ничего не весят.
-var base_weight := 2.0
-var _last_weight := -1.0
+var artifacts: Array[ItemData] = []
 
 
-func _init() -> void:
-	changed.connect(_check_weight)
-
-
-## Груз: базовое снаряжение + всё на поясе и в рюкзаке.
-func get_total_weight() -> float:
-	var kg := base_weight
-	for it in belt:
-		if it != null:
-			kg += it.weight
-	for it in backpack:
-		if it != null:
-			kg += it.weight
-	return kg
-
-
-func _check_weight() -> void:
-	var kg := get_total_weight()
-	if not is_equal_approx(kg, _last_weight):
-		_last_weight = kg
-		weight_changed.emit(kg)
-
-
-func setup(belt_slots: int) -> void:
+func setup() -> void:
 	backpack.clear()
 	backpack.resize(BACKPACK_COLS * BACKPACK_ROWS)
-	belt.clear()
-	belt.resize(belt_slots)
+	artifacts.clear()
 	changed.emit()
 
 
-func slots(zone: Zone) -> Array[ItemData]:
-	return belt if zone == Zone.BELT else backpack
+func get_item(idx: int) -> ItemData:
+	return backpack[idx] if idx >= 0 and idx < backpack.size() else null
 
 
-func get_item(zone: Zone, idx: int) -> ItemData:
-	var s := slots(zone)
-	return s[idx] if idx >= 0 and idx < s.size() else null
-
-
-## Артефакт идёт в свободный слот пояса, иначе в рюкзак. Расходники — в рюкзак.
+## Артефакт — в список (без ограничения), расходник — в свободную клетку рюкзака.
 func add_item(item: ItemData) -> bool:
 	if item.kind == ItemData.Kind.ARTIFACT:
-		var b := belt.find(null)
-		if b >= 0:
-			belt[b] = item
-			item_added.emit(item, true)
-			changed.emit()
-			return true
-	var i := backpack.find(null)
-	if i < 0:
-		return false
-	backpack[i] = item
-	item_added.emit(item, false)
+		artifacts.append(item)
+	else:
+		var i := backpack.find(null)
+		if i < 0:
+			return false
+		backpack[i] = item
+	item_added.emit(item)
 	changed.emit()
 	return true
 
 
-## На пояс можно класть только артефакты.
-func can_place(zone: Zone, item: ItemData) -> bool:
-	return zone != Zone.BELT or item == null or item.kind == ItemData.Kind.ARTIFACT
-
-
-## Обмен содержимого двух слотов (пустой слот — просто перенос).
-func swap(za: Zone, ia: int, zb: Zone, ib: int) -> bool:
-	var a := get_item(za, ia)
-	var b := get_item(zb, ib)
-	if not can_place(zb, a) or not can_place(za, b):
-		return false
-	slots(za)[ia] = b
-	slots(zb)[ib] = a
+## Обмен содержимого двух клеток рюкзака (пустая клетка — просто перенос).
+func swap(a: int, b: int) -> void:
+	var t := backpack[a]
+	backpack[a] = backpack[b]
+	backpack[b] = t
 	changed.emit()
-	return true
 
 
-## ПКМ по артефакту: между рюкзаком и поясом.
-func quick_move(zone: Zone, idx: int) -> bool:
-	var item := get_item(zone, idx)
-	if item == null or item.kind != ItemData.Kind.ARTIFACT:
-		return false
-	var target := Zone.BACKPACK if zone == Zone.BELT else Zone.BELT
-	var free := slots(target).find(null)
-	if free < 0:
-		return false
-	return swap(zone, idx, target, free)
-
-
-## Забирает предмет из слота (например, чтобы бросить артефакт в мир).
-func take(zone: Zone, idx: int) -> ItemData:
-	var item := get_item(zone, idx)
-	if item != null:
-		slots(zone)[idx] = null
-		changed.emit()
-	return item
-
-
-## Убирает расходник из слота и возвращает его (применяет вызывающий).
-func consume(zone: Zone, idx: int) -> ItemData:
-	var item := get_item(zone, idx)
+## Убирает расходник из клетки и возвращает его (применяет вызывающий).
+func consume(idx: int) -> ItemData:
+	var item := get_item(idx)
 	if item == null or item.kind != ItemData.Kind.CONSUMABLE:
 		return null
-	slots(zone)[idx] = null
+	backpack[idx] = null
 	changed.emit()
 	return item
 
 
-## Слот расходника, лучше всего подходящий под недостающее здоровье; (-1, -1), если нет.
-func best_heal_slot(missing: float) -> Vector2i:
-	var best := Vector2i(-1, -1)
+## Клетка расходника, лучше всего подходящего под недостающее здоровье; -1, если нет.
+func best_heal_slot(missing: float) -> int:
+	var best := -1
 	var best_diff := INF
 	for i in backpack.size():
 		var it := backpack[i]
@@ -136,26 +67,18 @@ func best_heal_slot(missing: float) -> Vector2i:
 		var diff := absf(it.heal - missing)
 		if diff < best_diff:
 			best_diff = diff
-			best = Vector2i(Zone.BACKPACK, i)
+			best = i
 	return best
 
 
 func has_id(id: StringName) -> bool:
-	for it in belt:
-		if it != null and it.id == id:
+	for it in artifacts:
+		if it.id == id:
 			return true
 	for it in backpack:
 		if it != null and it.id == id:
 			return true
 	return false
-
-
-func belt_artifacts() -> Array[ItemData]:
-	var out: Array[ItemData] = []
-	for it in belt:
-		if it != null:
-			out.append(it)
-	return out
 
 
 func count_consumables() -> int:

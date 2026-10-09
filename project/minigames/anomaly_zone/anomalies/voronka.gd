@@ -2,7 +2,6 @@
 class_name Voronka
 extends Anomaly
 ## Воронка: большой радиус притяжения (слабее к краю) и маленькое ядро с постоянным уроном.
-## При инверсии (артефакт Грави) притяжение превращается в отталкивание.
 
 @export var radius := 200.0:
 	set(v):
@@ -36,7 +35,7 @@ func _extent() -> float:
 	return radius * scale_factor()
 
 
-## Стрелку рисуем у ядра, а не на краю огромной зоны.
+## Подпись — у ядра, а не на краю огромной зоны.
 func top_point() -> Vector2:
 	return global_position + Vector2(0.0, -core_radius * scale_factor() - 18.0)
 
@@ -74,31 +73,18 @@ func _tick(delta: float) -> void:
 				p.damage_over_time(dmg(fire_dps) * fire * delta)
 	var rr := radius * scale_factor()
 	var core := core_radius * scale_factor()
-	var sign_f := -1.0 if inverted else 1.0
 	for body in _bodies:
 		var offset := global_position - body.global_position
 		var d := offset.length()
 		if d < 0.001:
 			continue
 		var dir := offset / d
-		var f := pull * current_intensity * clampf(1.0 - d / rr, 0.0, 1.0) * sign_f
+		var f := pull * current_intensity * clampf(1.0 - d / rr, 0.0, 1.0)
 		if body is Player:
 			var p := body as Player
 			p.add_external_force(dir * f)
 			if d < core:
 				p.damage_over_time(dmg(core_dps) * delta)
-		elif body is Bolt:
-			var b := body as Bolt
-			b.apply_central_force(dir * f * b.mass)
-			if d < core and not inverted:
-				b.absorb()
-		elif body is WorldArtifact:
-			var wa := body as WorldArtifact
-			if inverted:
-				wa.release(-dir * 260.0)  # Грави выталкивает артефакт с орбиты
-				wa.apply_central_force(dir * f * wa.mass)
-			else:
-				wa.capture(self, clampf(d, core * 3.0, rr * 0.45))
 
 
 func _draw() -> void:
@@ -113,8 +99,8 @@ func _draw() -> void:
 	draw_arc(Vector2.ZERO, rr, 0.0, TAU, 48, tint(Color(purple, 0.18)), 1.0)
 	draw_circle(Vector2.ZERO, core, tint(Color("1b0f2e", 0.95)))
 	draw_arc(Vector2.ZERO, core, 0.0, TAU, 24, tint(Color(purple, 0.9)), 2.0)
-	# Спиральные «частицы» движутся к ядру (от ядра — при инверсии).
-	var flow := -1.0 if inverted else 1.0
+	# Спиральные «частицы» движутся к ядру.
+	var flow := 1.0
 	var arms := 5
 	var dots := 9
 	for k in arms:

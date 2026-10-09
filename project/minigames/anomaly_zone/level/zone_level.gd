@@ -9,7 +9,8 @@ const FIELD_MARGIN := 120.0
 
 var bounds := Rect2(-200.0, -300.0, 8600.0, 1300.0)
 var fall_y := 960.0
-var checkpoints: Array[Checkpoint] = []
+## Точка А: старт забега (на полу, ноги игрока).
+var start_pos := Vector2.ZERO
 var finish_sign: FinishSign
 
 
@@ -76,11 +77,9 @@ func _pickup(id: StringName, x: float, y: float = FLOOR_Y) -> void:
 	add_child(p)
 
 
-func _checkpoint(x: float) -> void:
-	var c := Checkpoint.new()
-	c.position = Vector2(x, FLOOR_Y)
-	add_child(c)
-	checkpoints.append(c)
+## Точка А — старт забега.
+func _start(x: float, y: float = FLOOR_Y) -> void:
+	start_pos = Vector2(x, y)
 
 
 func _sign(x: float, text: String, w: float = 320.0, y: float = FLOOR_Y) -> void:

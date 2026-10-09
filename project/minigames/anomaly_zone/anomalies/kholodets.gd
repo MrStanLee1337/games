@@ -1,7 +1,7 @@
 @tool
 class_name Kholodets
 extends Anomaly
-## Холодец: лужа на полу. Замедляет игрока, наносит урон со временем, болты тонут.
+## Холодец: лужа на полу. Замедляет игрока, наносит урон со временем.
 ## Начало координат — середина нижнего края лужи (на уровне пола).
 
 @export var size := Vector2(200.0, 18.0):
@@ -10,15 +10,11 @@ extends Anomaly
 		_rebuild()
 ## Урон, HP в секунду.
 @export var dps := 6.0
-## Форма «желе» (Медуза): отскок при приземлении и добавка к прыжку.
-@export var jelly_bounce := 0.85
-@export var jelly_jump_boost := 1.3
 
 ## Сухость от жара Жарки: при 1 лужа высыхает насовсем (до сброса аномалий при смерти).
 var dryness := 0.0
 var dried := false
 var _shock_t := 0.0
-var _wobble := 0.0
 var _shock_pts: Array[PackedVector2Array] = []
 
 
@@ -54,8 +50,6 @@ func add_dryness(v: float) -> void:
 
 ## Разряд Электры, касающейся лужи, проходит по всей луже.
 func electrify(damage: float, stun_time: float) -> void:
-	if form == &"jelly":
-		return  # желе ток не проводит
 	for p in _players():
 		p.take_damage(damage, Vector2(0.0, -1.0), true)
 		p.stun(stun_time)
@@ -73,15 +67,6 @@ func _reset_extra() -> void:
 	dryness = 0.0
 	dried = false
 	_shock_t = 0.0
-
-
-## Желе: не жжёт и не липнет. Приземлился — отскок (доля скорости падения), прыжок выше.
-func _jelly_tick() -> void:
-	for p in _players():
-		p.set_jump_boost(jelly_jump_boost)
-		if p.landing_speed > 220.0:
-			p.apply_impulse(Vector2(0.0, -minf(p.landing_speed * jelly_bounce, 950.0)), 0.0)
-			_wobble = 1.0
 
 
 func _make_shock() -> void:
@@ -113,19 +98,12 @@ func _tick(delta: float) -> void:
 		_shock_t -= delta
 		if int(_shock_t * 30.0) % 2 == 0:
 			_make_shock()
-	_wobble = maxf(0.0, _wobble - delta * 2.0)
 	if is_asleep():
 		return
-	if form == &"jelly":
-		_jelly_tick()
-		return
-	# Замедление зависит только от интенсивности, урон — ещё и от damage_mult (Медуза).
 	var slow := clampf(1.0 - 0.5 * current_intensity, 0.2, 1.0)
 	for p in _players():
 		p.set_move_multiplier(slow)
 		p.damage_over_time(dmg(dps) * delta)
-	for b in _bolts():
-		b.sink()
 
 
 func _draw() -> void:
@@ -145,19 +123,7 @@ func _draw() -> void:
 			x += 23.0
 		return
 	if live and is_asleep():
-		draw_rect(Rect2(-w * 0.5, -3.0, w, 3.0), Color(0.5, 0.45, 0.35, 0.3))  # подсохла рядом с Пламенем
-		return
-	if live and form == &"jelly":
-		var jp := PackedVector2Array()
-		for i in 15:
-			var jx := -w * 0.5 + w * i / 14.0
-			var sag := _wobble * 6.0 * sin(_time * 18.0) * sin(PI * i / 14.0)
-			jp.append(Vector2(jx, -h + sag))
-		jp.append(Vector2(w * 0.5, 0.0))
-		jp.append(Vector2(-w * 0.5, 0.0))
-		draw_colored_polygon(jp, Color("ff9ad5", 0.55))
-		draw_polyline(jp.slice(0, 15), Color("ffd6f0", 0.95), 2.0)
-		draw_rect(Rect2(-w * 0.45, -h + 4.0, w * 0.9, 2.0), Color(1, 1, 1, 0.25))
+		draw_rect(Rect2(-w * 0.5, -3.0, w, 3.0), Color(0.5, 0.45, 0.35, 0.3))
 		return
 	var pts := PackedVector2Array()
 	var n := 14

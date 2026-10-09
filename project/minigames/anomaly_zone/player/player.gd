@@ -2,7 +2,8 @@ class_name Player
 extends CharacterBody2D
 ## Игрок: бег, прыжок, рывок, здоровье, камера.
 ## Числа движения — в MovementConfig (movement_default.tres); игрок читает эффективную копию `m`
-## (конфиг × пассивы артефактов), её пересчитывает recompute_movement().
+## (конфиг × множители артефактов и баффов), её пересчитывает recompute_movement().
+## Рывок тратит заряд (заряды дают Электры).
 ## Движение разложено по состояниям (enum MoveState); переход — только через change_state().
 ## Внешние силы (аномалии) действуют через apply_impulse / add_external_force / set_move_multiplier.
 
@@ -10,13 +11,8 @@ signal health_changed(hp: float, max_hp: float)
 signal died
 ## Короткое сообщение для HUD («Рюкзак полон» и т.п.).
 signal message(text: String)
-signal slot_selected(idx: int)
 signal charge_changed(value: int, max_value: int)
 signal state_changed(from: MoveState, to: MoveState)
-## Груз или его порог изменились (после пересчёта параметров движения).
-signal load_changed(kg: float, effective_kg: float, tier: MovementConfig.Tier)
-## Шум: шаги, подкат, приземление, удар болта. Слушателей пока нет — задел под мутантов.
-signal noise_emitted(pos: Vector2, radius: float)
 
 ## Группы по схеме ТЗ: на земле (STAND, RUN, SLIDE — подкат, CRAWL — ползком, ROLL — перекат),
 ## в воздухе (JUMP, FALL, DASH, WALL_SLIDE), на опоре (HANG — вис на краю, CLIMB — подтягивание,
@@ -36,34 +32,12 @@ const CROUCH_STATES := [MoveState.SLIDE, MoveState.CRAWL, MoveState.ROLL]
 @export var invuln_time := 0.6
 @export var hit_knockback := 260.0
 
-@export_group("Болты")
-@export var throw_speed := 420.0
-@export var throw_up := 280.0
-## Добавка к броску вверх, пока зажато «вверх».
-@export var throw_up_boost := 260.0
-@export var throw_cooldown := 0.4
+@export_group("Заряды рывка")
+@export var max_charge := 2
 
-@export_group("Инвентарь")
-@export var belt_slots := 3
-## Базовое снаряжение, кг (детектор, фляга, контейнеры): входит в груз всегда.
-@export var base_gear_weight := 2.0
-
-@export_group("Заряд (Батарейка)")
-@export var max_charge := 3
-@export var overload_damage := 25.0
-
-@export_group("Аура артефактов")
-@export var aura_radius := 160.0
-
-# Пассивы артефактов пояса (выставляет BeltAura через set_passives).
+# Множители движения от артефактов (этап 5) и баффов (этап 2); пересчёт — recompute_movement().
 var jump_multiplier := 1.0
 var gravity_multiplier := 1.0
-var regen_per_sec := 0.0
-## Рывок даёт только артефакт Вспышка (или заряд Батарейки — один рывок за заряд).
-var has_dash := false
-## Груз, кг, и эффективный груз (× гравитация пояса: с Грави 20 кг ощущаются как 15).
-var load_kg := 0.0
-var effective_load := 0.0
 
 ## Эффективные параметры движения: копия config с учётом пассивов. Только для чтения.
 var m: MovementConfig
@@ -76,15 +50,11 @@ var body_size: Vector2:
 
 var hp := 0.0
 var inventory := Inventory.new()
-## Выбранный слот пояса: его артефакт бросается клавишей G.
-var selected_slot := 0
 var facing := 1
 
 var _force_acc := Vector2.ZERO
 var _mult_acc := 1.0
-var _jump_boost_acc := 1.0
-var _charged_dash := false
-## Скорость падения в момент приземления (держится один кадр) — для желе.
+## Скорость падения в момент приземления (держится один кадр).
 var landing_speed := 0.0
 var charge := 0
 var _coyote := 0.0
@@ -101,8 +71,6 @@ var _lock_total := 1.0
 var _invuln := 0.0
 var _dead := false
 var _stun := 0.0
-var _throw_cd := 0.0
-var _drop_cd := 0.0
 var _no_dash_hint_t := 0.0
 var _fall_through: Platform = null
 var _fall_through_t := 0.0
@@ -147,14 +115,6 @@ var last_fall := 0.0
 # Лестница.
 var _ladder: Ladder = null
 var _ladder_down_t := 0.0
-## Детектор в руке (или достаётся): скорость не выше шага, подката и рывка нет.
-var detector_out := false
-var _detector_draw_t := 0.0
-# Шум: последний сигнал (для круга в F1) и такт шагов.
-var last_noise_pos := Vector2.ZERO
-var last_noise_radius := 0.0
-var last_noise_msec := -100000
-var _step_t := 0.0
 # Камера: вертикаль с мёртвой зоной, смещение при падении, зум.
 var _cam_y := 0.0
 var _fall_look := 0.0
@@ -181,12 +141,8 @@ func _ready() -> void:
 	_cam_y = global_position.y + m.cam_offset_y
 	_camera.global_position = Vector2(global_position.x, _cam_y)
 	_camera.make_current()
-	inventory.base_weight = base_gear_weight
-	inventory.weight_changed.connect(_on_weight_changed)
-	inventory.setup(belt_slots)
-	var aura := BeltAura.new()
-	aura.radius = aura_radius
-	add_child(aura)
+	inventory.setup()
+	add_child(PlayerAura.new())
 	hp = max_hp
 	health_changed.emit(hp, max_hp)
 
@@ -197,8 +153,7 @@ func _physics_process(delta: float) -> void:
 	# Силы и замедление, собранные за прошлый кадр, — порядок обработки узлов не важен.
 	var ext := _force_acc
 	var slow := _mult_acc
-	var boost := _jump_boost_acc
-	_jump_boost_acc = 1.0
+	var boost := 1.0
 	_force_acc = Vector2.ZERO
 	_mult_acc = 1.0
 	_tick(delta)
@@ -216,14 +171,7 @@ func _physics_process(delta: float) -> void:
 		_coyote = m.coyote_time
 		_air_dash_used = false
 		_wall_jumps = 0
-	if not stunned and Input.is_action_just_pressed(&"az_detector"):
-		if detector_out:
-			_put_detector_away()
-		else:
-			_take_detector()
 	if not stunned and Input.is_action_just_pressed(&"az_jump"):
-		if detector_out:
-			_put_detector_away()  # Пробел мгновенно убирает детектор и прыгает
 		var plat := _floor_platform() if Input.is_action_pressed(&"az_down") else null
 		if plat and plat.one_way:
 			_drop_through(plat)  # вниз + прыжок на односторонней платформе — спрыгнуть
@@ -231,13 +179,6 @@ func _physics_process(delta: float) -> void:
 			_buffer = m.jump_buffer
 	if not stunned and Input.is_action_just_pressed(&"az_dash"):
 		_try_dash(dir)
-	for i in mini(3, inventory.belt.size()):
-		if Input.is_action_just_pressed(StringName("az_slot_%d" % (i + 1))):
-			select_slot(i)
-	if Input.is_action_just_pressed(&"az_drop"):
-		_try_drop()
-	if Input.is_action_just_pressed(&"az_throw"):
-		_try_throw()
 	if Input.is_action_just_pressed(&"az_interact"):
 		_try_interact()
 	if Input.is_action_just_pressed(&"az_heal"):
@@ -284,7 +225,6 @@ func _physics_process(delta: float) -> void:
 		_on_landed(global_position.y - _fall_peak_y, landing_speed)
 	_fall_peak_y = minf(_fall_peak_y, global_position.y)
 	_update_state()
-	_step_noise(delta)
 	if not stunned and not _crouched:
 		if is_on_floor():
 			if state in [MoveState.STAND, MoveState.RUN]:
@@ -306,13 +246,10 @@ func _tick(delta: float) -> void:
 	_lock -= delta
 	_invuln -= delta
 	_stun -= delta
-	_throw_cd -= delta
-	_drop_cd -= delta
 	_no_dash_hint_t -= delta
 	_wall_coyote -= delta
 	_wj_lock_t -= delta
 	_regrab_cd -= delta
-	_detector_draw_t -= delta
 	_ledge_seen_t -= delta
 	_slide_cd -= delta
 	_roll_buf -= delta
@@ -326,8 +263,6 @@ func _tick(delta: float) -> void:
 		if _dash_t <= 0.0:
 			velocity.x = _dash_dir * m.run_speed * m.dash_end_speed
 			_update_state()
-	if regen_per_sec > 0.0 and hp < max_hp:
-		_set_hp(minf(max_hp, hp + regen_per_sec * delta))
 
 
 func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) -> void:
@@ -338,7 +273,7 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 	if _wj_lock_t > 0.0 and dir != 0.0 and int(signf(dir)) == _wj_dir:
 		ctl *= m.wall_jump_control  # сразу после отскока к стене не тянет обратно
 	var on_floor := is_on_floor()
-	var target := dir * top_speed() * slow
+	var target := dir * m.run_speed * slow
 	var vx := velocity.x
 	var rate: float
 	if dir == 0.0:
@@ -367,7 +302,7 @@ func _vertical(delta: float, dir: float, boost: float) -> void:
 		_coyote = 0.0
 		_jumping = true
 		_apex_ok = true
-	elif _buffer > 0.0 and not on_floor and _wall_coyote > 0.0 and _wall_jumps < m.wall_jumps_max and m.allow_wall_jump:
+	elif _buffer > 0.0 and not on_floor and _wall_coyote > 0.0 and _wall_jumps < m.wall_jumps_max:
 		# Отскок от стены (при скольжении или сразу после отрыва).
 		velocity = Vector2(-_wall_dir * m.wall_jump_out, -m.wall_jump_up)
 		_wall_jumps += 1
@@ -401,36 +336,21 @@ func _vertical(delta: float, dir: float, boost: float) -> void:
 func _try_dash(dir: float) -> void:
 	if state in SUPPORT_STATES:
 		return
-	if detector_out:
+	if charge <= 0:
 		if _no_dash_hint_t <= 0.0:
-			message.emit("Детектор в руке — рывка нет (X — убрать)")
-			_no_dash_hint_t = 3.0
-		return
-	if not m.allow_dash:
-		if (has_dash or charge > 0) and _no_dash_hint_t <= 0.0:
-			message.emit("Перегруз — рывка нет")
-			_no_dash_hint_t = 3.0
-		return
-	if not has_dash and charge <= 0:
-		if _no_dash_hint_t <= 0.0:
-			message.emit("Рывок — только с Вспышкой (или заряд Батарейки)")
+			message.emit("Рывок тратит заряд — заряды дают Электры")
 			_no_dash_hint_t = 3.0
 		return
 	if _dash_cd > 0.0 or _dash_t > 0.0:
 		return
 	if not is_on_floor():
-		if _air_dash_used or not m.allow_air_dash:
+		if _air_dash_used:
 			return
 		_air_dash_used = true
 	_dash_dir = int(signf(dir)) if dir != 0.0 else facing
 	facing = _dash_dir
-	# Заряд Батарейки тратится всегда, если он есть: без Вспышки это обычный рывок,
-	# со Вспышкой — усиленный.
-	var use_charge := charge > 0
-	_charged_dash = use_charge and has_dash
-	if use_charge:
-		_set_charge(charge - 1)
-	_dash_t = m.dash_time * (m.charged_dash_time if _charged_dash else 1.0)
+	_set_charge(charge - 1)
+	_dash_t = m.dash_time
 	_dash_cd = m.dash_cooldown
 	_jumping = false
 	_apex_ok = false
@@ -479,6 +399,18 @@ func _ray(from: Vector2, to: Vector2) -> Dictionary:
 	return get_world_2d().direct_space_state.intersect_ray(q)
 
 
+## Стоит на полу всем телом: под обоими краями ног есть опора (для возврата из ямы).
+func is_firmly_grounded() -> bool:
+	if not is_on_floor():
+		return false
+	var half := body_size * 0.5
+	for dx in [-half.x + 1.0, half.x - 1.0]:
+		var from := global_position + Vector2(dx, half.y - 2.0)
+		if _ray(from, from + Vector2(0.0, 8.0)).is_empty():
+			return false
+	return true
+
+
 ## Свободно ли место под тело с центром в c.
 func _box_free(c: Vector2) -> bool:
 	var q := PhysicsShapeQueryParameters2D.new()
@@ -515,7 +447,7 @@ func _find_ledge(s: int) -> Dictionary:
 
 
 func _try_ledge_grab(dir: float) -> void:
-	if _regrab_cd > 0.0 or not m.allow_grab:
+	if _regrab_cd > 0.0:
 		return
 	var s := int(signf(dir)) if dir != 0.0 else int(signf(velocity.x))
 	if s == 0:
@@ -628,7 +560,7 @@ func _can_stand() -> bool:
 
 ## S на земле: на бегу — подкат, стоя или медленно — ползком.
 func _ground_down_actions() -> void:
-	if _down_edge and _slide_cd <= 0.0 and m.allow_slide and not detector_out \
+	if _down_edge and _slide_cd <= 0.0 \
 			and absf(velocity.x) >= m.run_speed * m.slide_min_speed:
 		_start_slide()
 	elif Input.is_action_pressed(&"az_down"):
@@ -640,8 +572,6 @@ func _start_slide() -> void:
 	_set_crouch(true)
 	var s := signf(velocity.x) if velocity.x != 0.0 else float(facing)
 	velocity.x = s * maxf(m.slide_speed, absf(velocity.x))
-	emit_noise(global_position + Vector2(0.0, body_size.y * 0.5), m.noise_slide)
-	_step_t = m.noise_step_interval
 	_slide_t = m.slide_time
 	_slide_cd = m.slide_time + m.slide_cooldown
 	change_state(MoveState.SLIDE)
@@ -696,8 +626,6 @@ func _state_crawl(delta: float, dir: float, slow: float, boost: float) -> void:
 ## Приземление с высоты h (от верхней точки полёта).
 func _on_landed(h: float, speed: float) -> void:
 	last_fall = h
-	if h > 4.0:
-		emit_noise(global_position + Vector2(0.0, body_size.y * 0.5), m.noise_land + m.noise_land_per_px * h)
 	var hurt := h > m.safe_fall_height and speed >= m.fall_damage_min_speed
 	if _roll_buf > 0.0:
 		_roll_buf = 0.0
@@ -706,7 +634,7 @@ func _on_landed(h: float, speed: float) -> void:
 			if hurt:
 				_fall_hurt(h, true)
 			return
-		if absf(velocity.x) >= m.run_speed * m.slide_min_speed and _slide_cd <= 0.0 and m.allow_slide and not detector_out:
+		if absf(velocity.x) >= m.run_speed * m.slide_min_speed and _slide_cd <= 0.0:
 			_start_slide()  # невысоко: S перед касанием — сразу в подкат
 			return
 	if hurt:
@@ -847,66 +775,10 @@ func _release_ladder() -> void:
 		_fall_through_t = 0.15
 
 
-# --- Тихий шаг, детектор, шум ----------------------------------------------
-
-## Потолок скорости бега: тихий шаг (Ctrl) и детектор в руке — не быстрее шага.
-func top_speed() -> float:
-	if detector_out or Input.is_action_pressed(&"az_walk"):
-		return minf(m.run_speed, m.walk_speed)
-	return m.run_speed
-
-
-func is_walking() -> bool:
-	return absf(velocity.x) <= m.walk_speed + 1.0
-
-
-## X: достать детектор (detector_draw_time), он сразу ограничивает скорость.
-func _take_detector() -> void:
-	if state in SUPPORT_STATES:
-		return
-	detector_out = true
-	_detector_draw_t = m.detector_draw_time
-
-
-func _put_detector_away() -> void:
-	detector_out = false
-	_detector_draw_t = 0.0
-
-
-## Детектор уже в руке (а не достаётся).
-func detector_ready() -> bool:
-	return detector_out and _detector_draw_t <= 0.0
-
-
-func emit_noise(pos: Vector2, radius: float) -> void:
-	last_noise_pos = pos
-	last_noise_radius = radius
-	last_noise_msec = Time.get_ticks_msec()
-	noise_emitted.emit(pos, radius)
-
-
-## Шаги шумят раз в noise_step_interval: бег — noise_run, шаг и ползком — noise_walk, подкат — noise_slide.
-func _step_noise(delta: float) -> void:
-	if not is_on_floor() or absf(velocity.x) < 20.0 or state not in [MoveState.STAND, MoveState.RUN, MoveState.SLIDE,
-			MoveState.CRAWL, MoveState.ROLL]:
-		_step_t = 0.0
-		return
-	_step_t -= delta
-	if _step_t > 0.0:
-		return
-	_step_t = m.noise_step_interval
-	var r := m.noise_run
-	if state == MoveState.SLIDE:
-		r = m.noise_slide
-	elif state == MoveState.CRAWL or is_walking():
-		r = m.noise_walk
-	emit_noise(global_position + Vector2(0.0, body_size.y * 0.5), r)
-
-
 # --- Камера ----------------------------------------------------------------
 
-## Взгляд вперёд, мёртвая зона по вертикали, смещение вниз при быстром падении, зум у аномалий
-## и с детектором, тряска не больше shake_max.
+## Взгляд вперёд, мёртвая зона по вертикали, смещение вниз при быстром падении, зум у аномалий,
+## тряска не больше shake_max.
 func _update_camera(delta: float) -> void:
 	var want := facing * m.look_ahead if absf(velocity.x) > 30.0 else 0.0
 	_look = move_toward(_look, want, m.look_ahead / m.look_ahead_time * delta)
@@ -925,8 +797,6 @@ func _update_camera(delta: float) -> void:
 	var z := 1.0
 	if in_anomaly_field():
 		z = m.zoom_field
-	if detector_out:
-		z = maxf(z, m.zoom_detector)
 	if not is_equal_approx(z, _zoom_target):
 		_zoom_target = z
 		if _zoom_tween:
@@ -947,7 +817,7 @@ func camera_zoom() -> float:
 
 
 func _state_dash() -> void:
-	velocity = Vector2(_dash_dir * m.dash_speed * (m.charged_dash_speed if _charged_dash else 1.0), 0.0)
+	velocity = Vector2(_dash_dir * m.dash_speed, 0.0)
 
 
 func _try_interact() -> void:
@@ -961,22 +831,22 @@ func use_best_consumable() -> void:
 	if hp >= max_hp:
 		message.emit("Здоровье полное")
 		return
-	var slot := inventory.best_heal_slot(max_hp - hp)
-	if slot.x < 0:
+	var idx := inventory.best_heal_slot(max_hp - hp)
+	if idx < 0:
 		message.emit("Нет расходников")
 		return
-	use_item(slot.x as Inventory.Zone, slot.y)
+	use_item(idx)
 
 
-## Применяет расходник из слота; false, если нельзя.
-func use_item(zone: Inventory.Zone, idx: int) -> bool:
-	var it := inventory.get_item(zone, idx)
+## Применяет расходник из слота рюкзака; false, если нельзя.
+func use_item(idx: int) -> bool:
+	var it := inventory.get_item(idx)
 	if it == null or it.kind != ItemData.Kind.CONSUMABLE:
 		return false
 	if hp >= max_hp:
 		message.emit("Здоровье полное")
 		return false
-	inventory.consume(zone, idx)
+	inventory.consume(idx)
 	heal(it.heal)
 	message.emit("%s: +%d HP" % [it.display_name, int(it.heal)])
 	return true
@@ -1005,49 +875,6 @@ func _drop_through(plat: Platform) -> void:
 	_buffer = 0.0
 
 
-func select_slot(idx: int) -> void:
-	selected_slot = clampi(idx, 0, inventory.belt.size() - 1)
-	slot_selected.emit(selected_slot)
-
-
-## G — бросить артефакт из выбранного слота пояса; G с зажатым «вниз» — положить под ноги.
-func _try_drop() -> void:
-	if _drop_cd > 0.0:
-		return
-	var it := inventory.get_item(Inventory.Zone.BELT, selected_slot)
-	if it == null:
-		message.emit("Слот %d пуст" % (selected_slot + 1))
-		return
-	_drop_cd = 0.3
-	inventory.take(Inventory.Zone.BELT, selected_slot)
-	var wa := WorldArtifact.new()
-	wa.item = it
-	wa.aura_r = aura_radius
-	get_parent().add_child(wa)
-	if Input.is_action_pressed(&"az_down"):
-		wa.global_position = global_position + Vector2(facing * 16.0, 8.0)
-		message.emit("Положен: " + it.display_name)
-	else:
-		wa.global_position = global_position + Vector2(facing * 14.0, -10.0)
-		wa.linear_velocity = _throw_velocity()
-		message.emit("Брошен: " + it.display_name)
-
-
-func _throw_velocity() -> Vector2:
-	var up := throw_up + (throw_up_boost if Input.is_action_pressed(&"az_up") else 0.0)
-	return Vector2(facing * throw_speed + velocity.x * 0.4, -up)
-
-
-func _try_throw() -> void:
-	if _throw_cd > 0.0:
-		return
-	_throw_cd = throw_cooldown
-	var b := Bolt.new()
-	get_parent().add_child(b)
-	b.global_position = global_position + Vector2(facing * 14.0, -10.0)
-	b.linear_velocity = _throw_velocity()
-
-
 # --- API для внешних сил -------------------------------------------------
 
 ## Резкий толчок. control_lock — сколько секунд управление ослаблено.
@@ -1074,32 +901,14 @@ func add_external_force(f: Vector2) -> void:
 	_force_acc += f
 
 
-## Временная добавка к прыжку (желе). Вызывать каждый кадр; берётся максимум.
-func set_jump_boost(m: float) -> void:
-	_jump_boost_acc = maxf(_jump_boost_acc, m)
-
-
-## Разряд Электры ушёл в Батарейку на поясе. Перегрузка — удар по самому игроку.
-func absorb_discharge() -> void:
-	if charge >= max_charge:
-		_set_charge(0)
-		message.emit("Перегрузка Батарейки!")
-		take_damage(overload_damage, Vector2(-facing, -1.0), true)
-		stun(0.5)
-	else:
-		_set_charge(charge + 1)
-
-
-func has_belt_artifact(id: StringName) -> bool:
-	for it in inventory.belt_artifacts():
-		if it.id == id:
-			return true
-	return false
-
-
 func _set_charge(v: int) -> void:
-	charge = v
+	charge = clampi(v, 0, max_charge)
 	charge_changed.emit(charge, max_charge)
+
+
+## Добавить заряды рывка (не больше max_charge).
+func add_charge(n: int = 1) -> void:
+	_set_charge(charge + n)
 
 
 ## Замедление. Вызывать каждый физический кадр; из нескольких источников берётся минимум.
@@ -1109,65 +918,14 @@ func set_move_multiplier(m: float) -> void:
 
 # --- Параметры движения и состояния ---------------------------------------
 
-## Пассивы артефактов пояса меняют эффективные параметры (вызывает BeltAura при смене пояса).
-func set_passives(jump_mult: float, grav_mult: float, regen: float, dash: bool = false) -> void:
-	jump_multiplier = jump_mult
-	gravity_multiplier = grav_mult
-	regen_per_sec = regen
-	has_dash = dash
-	recompute_movement()
-
-
-## Эффективные параметры = конфиг × порог груза × пассивы пояса.
-## Пересчёт при смене пояса или груза, а не каждый кадр.
+## Эффективные параметры = конфиг × множители артефактов и баффов.
+## Пересчёт при смене набора, а не каждый кадр.
 func recompute_movement() -> void:
-	var old_tier: MovementConfig.Tier = m.tier if m else MovementConfig.Tier.LIGHT
 	m = config.duplicate() as MovementConfig
-	effective_load = load_kg * gravity_multiplier
-	m.apply_tier(m.tier_for(effective_load))
-	m.derive(jump_multiplier * m.tier_jump_mult, gravity_multiplier)
-	if m.tier != old_tier and is_node_ready():
-		var lost := lost_move_names()
-		message.emit("Груз: %s%s" % [MovementConfig.TIER_NAMES[m.tier],
-			" — нет: " + ", ".join(lost) if not lost.is_empty() else ""])
-	load_changed.emit(load_kg, effective_load, m.tier)
+	m.derive(jump_multiplier, gravity_multiplier)
 
 
-func _on_weight_changed(kg: float) -> void:
-	load_kg = kg
-	recompute_movement()
-
-
-## Приёмы, которые отнял груз: id для HUD.
-func lost_moves() -> Array[StringName]:
-	var out: Array[StringName] = []
-	if not m.allow_wall_jump:
-		out.append(&"wall_jump")
-	if not m.allow_air_dash:
-		out.append(&"air_dash")
-	if not m.allow_slide:
-		out.append(&"slide")
-	if not m.allow_grab:
-		out.append(&"grab")
-	if not m.allow_dash:
-		out.append(&"dash")
-	return out
-
-
-const MOVE_NAMES := {
-	&"wall_jump": "отскок от стены", &"air_dash": "рывок в воздухе", &"slide": "подкат",
-	&"grab": "зацеп", &"dash": "рывок",
-}
-
-
-func lost_move_names() -> Array[String]:
-	var out: Array[String] = []
-	for id in lost_moves():
-		out.append(MOVE_NAMES[id])
-	return out
-
-
-## Гравитация с учётом пассивов; при падении — усиленная. Нужна аномалиям (пар, парение).
+## Гравитация с учётом множителей; при падении — усиленная.
 func effective_gravity(falling: bool) -> float:
 	return m.gravity * (m.fall_gravity_mult if falling else 1.0)
 
@@ -1194,8 +952,6 @@ func change_state(s: MoveState) -> void:
 		return
 	var from := state
 	state = s
-	if s in SUPPORT_STATES and detector_out:
-		_put_detector_away()  # вис, подтягивание и лестница — нужны обе руки
 	if from == MoveState.LADDER:
 		_release_ladder()
 	var line := "%.2f %s → %s" % [Time.get_ticks_msec() / 1000.0, STATE_NAMES[from], STATE_NAMES[s]]
@@ -1291,12 +1047,21 @@ func respawn(pos: Vector2, full_heal: bool) -> void:
 	_invuln = 0.8
 	if full_heal:
 		_set_hp(max_hp)
-	_put_detector_away()
 	_cam_y = pos.y + m.cam_offset_y
 	_look = 0.0
 	_fall_look = 0.0
 	_camera.global_position = Vector2(pos.x, _cam_y)
 	_camera.reset_smoothing()
+
+
+## Новый забег: инвентарь, заряды и множители — с нуля, полное здоровье.
+func reset_run(pos: Vector2) -> void:
+	inventory.setup()
+	jump_multiplier = 1.0
+	gravity_multiplier = 1.0
+	recompute_movement()
+	_set_charge(0)
+	respawn(pos, true)
 
 
 func set_camera_limits(r: Rect2) -> void:
@@ -1314,7 +1079,7 @@ func _set_hp(v: float) -> void:
 func _draw() -> void:
 	var col := Color("dfe3ee")
 	if state == MoveState.DASH:
-		col = Color("ffe46b") if _charged_dash else Color("8fd3ff")
+		col = Color("8fd3ff")
 	elif state == MoveState.ROLL:
 		col = Color("c8f0c0")
 	var half := body_size * 0.5
@@ -1322,12 +1087,3 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2(-half.x, top), Vector2(body_size.x, half.y - top)), col)
 	var eye_x := half.x - 12.0 if facing > 0 else -half.x + 2.0
 	draw_rect(Rect2(Vector2(eye_x, top + (5.0 if _crouched else 8.0)), Vector2(10.0, 5.0)), Color("15171c"))
-	if detector_out:
-		# Детектор в руке: коробка с антенной; пока достаётся — поднимается снизу.
-		var k := 1.0 - clampf(_detector_draw_t / m.detector_draw_time, 0.0, 1.0)
-		var hand := Vector2(facing * (half.x + 4.0), lerpf(half.y - 4.0, -4.0, k))
-		var dcol := Color("e0c068", 0.4 + 0.6 * k)
-		draw_rect(Rect2(hand - Vector2(5.0, 6.0), Vector2(10.0, 12.0)), dcol)
-		draw_line(hand + Vector2(0.0, -6.0), hand + Vector2(facing * 4.0, -14.0), dcol, 1.5)
-		if detector_ready():
-			draw_circle(hand + Vector2(0.0, -1.0), 2.0, Color("7dff8a"))

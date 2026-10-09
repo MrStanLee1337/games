@@ -26,7 +26,7 @@ func is_in_reach(from: Vector2) -> bool:
 	return from.distance_to(global_position + Vector2(0, -18)) <= interact_radius
 
 
-## Ближайший к точке подбираемый предмет (Pickup или WorldArtifact) в пределах досягаемости.
+## Ближайший к точке подбираемый предмет в пределах досягаемости.
 ## Подсказку «E» рисует только он, и именно его подбирает игрок.
 static func nearest_in_reach(tree: SceneTree, from: Vector2) -> Node2D:
 	var best: Node2D = null

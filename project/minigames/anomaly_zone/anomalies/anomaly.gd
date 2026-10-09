@@ -2,7 +2,7 @@
 class_name Anomaly
 extends Area2D
 ## Базовая аномалия. Наследники задают форму (_new_shape/_apply_shape), поведение (_tick) и вид (_draw).
-## Артефакты не упоминаются: пояс игрока лишь вызывает set_modifier()/clear_modifier().
+## Артефакты не упоминаются: аура игрока лишь передаёт словарь эффектов через set_aura().
 
 enum Type { ZHARKA, ELECTRA, TRAMPLIN, VORONKA, KHOLODETS }
 enum State { IDLE, TELEGRAPH, ACTIVE, COOLDOWN }
@@ -21,13 +21,8 @@ const SMOOTH := 5.0
 
 var anomaly_type: Type = Type.ZHARKA
 var current_intensity := 1.0
-## Включается артефактом: сила меняет знак (притяжение → отталкивание и т.п.).
-var inverted := false
-var mod_mult := 1.0
-## Отдельный множитель урона (артефакт может обнулить урон, не трогая остальное).
-var damage_mult := 1.0
-## Качественное превращение от артефакта (&"" — обычная аномалия). Смысл задаёт наследник.
-var form: StringName = &""
+## Эффекты ауры артефакта игрока (AuraSystem); пусто — аура не достаёт. Смысл полей задаёт наследник.
+var aura: Dictionary = {}
 var state: State = State.IDLE
 
 var _state_t := 0.0
@@ -41,7 +36,7 @@ var _last_scale := -1.0
 func _ready() -> void:
 	current_intensity = base_intensity
 	collision_layer = 0
-	collision_mask = 14  # игрок (2), болты (4), брошенные артефакты (8)
+	collision_mask = 2  # игрок
 	monitorable = false
 	_rebuild()
 	if Engine.is_editor_hint():
@@ -51,25 +46,18 @@ func _ready() -> void:
 	body_exited.connect(_on_body_exited)
 
 
-# --- Публичный интерфейс для пояса артефактов ------------------------------
+# --- Публичный интерфейс ---------------------------------------------------
 
-func set_modifier(mult: float, inv: bool, dmg: float = 1.0, new_form: StringName = &"") -> void:
-	mod_mult = mult
-	inverted = inv
-	damage_mult = dmg
-	form = new_form
-
-
-func clear_modifier() -> void:
-	set_modifier(1.0, false, 1.0)
+func set_aura(effects: Dictionary) -> void:
+	aura = effects
 
 
 func target_intensity() -> float:
-	return clampf(base_intensity * mod_mult, 0.0, INTENSITY_MAX)
+	return clampf(base_intensity, 0.0, INTENSITY_MAX)
 
 
 func reset_state() -> void:
-	clear_modifier()
+	aura = {}
 	current_intensity = base_intensity
 	_set_state(State.IDLE)
 	_reset_extra()
@@ -87,10 +75,10 @@ func scale_factor() -> float:
 
 
 func dmg(base: float) -> float:
-	return base * current_intensity * damage_mult
+	return base * current_intensity
 
 
-## Серость/тусклость при ослаблении, яркость при усилении, смена оттенка при инверсии.
+## Серость/тусклость при слабой интенсивности, яркость при сильной.
 func tint(c: Color) -> Color:
 	var out := c
 	var i := current_intensity
@@ -100,8 +88,6 @@ func tint(c: Color) -> Color:
 		out.a *= lerpf(0.25, 1.0, clampf(i, 0.0, 1.0))
 	elif i > 1.0:
 		out = c.lightened(clampf((i - 1.0) * 0.25, 0.0, 0.5))
-	if inverted:
-		out = Color.from_hsv(fposmod(out.h + 0.5, 1.0), out.s, out.v, out.a)
 	return out
 
 
@@ -110,12 +96,12 @@ func edge_distance(p: Vector2) -> float:
 	return maxf(0.0, p.distance_to(global_position) - _extent())
 
 
-## Куда тянуть линию от игрока.
+## Центр видимой части (для связей между аномалиями).
 func visual_center() -> Vector2:
 	return global_position
 
 
-## Над какой точкой рисовать стрелку ▲/▼.
+## Над какой точкой подписывать аномалию (оверлей F1).
 func top_point() -> Vector2:
 	return global_position + Vector2(0.0, -_extent() - 16.0)
 
@@ -166,27 +152,10 @@ func _players() -> Array[Player]:
 	return out
 
 
-func _bolts() -> Array[Bolt]:
-	var out: Array[Bolt] = []
-	for b in _bodies:
-		if b is Bolt:
-			out.append(b as Bolt)
-	return out
-
-
-func _world_artifacts() -> Array[WorldArtifact]:
-	var out: Array[WorldArtifact] = []
-	for b in _bodies:
-		if b is WorldArtifact:
-			out.append(b as WorldArtifact)
-	return out
-
-
-## Игрок или болт внутри — «провокатор» для Жарки, Электры, Трамплина.
-## Брошенные артефакты аномалии не провоцируют.
+## Игрок внутри — «провокатор» для Жарки, Электры, Трамплина.
 func _has_provoker() -> bool:
 	for b in _bodies:
-		if b is Player or b is Bolt:
+		if b is Player:
 			return true
 	return false
 
