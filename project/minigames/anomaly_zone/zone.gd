@@ -10,6 +10,8 @@ const SAFE_TIME := 0.25
 
 ## Песочница взаимодействий вместо трассы (sandbox.tscn).
 @export var sandbox := false
+## Сид забега (содержимое тайников); -1 — случайный. Для повторяемости в тестах.
+@export var run_seed := -1
 
 @onready var world: Node2D = $World
 @onready var hud_layer: CanvasLayer = $HUD
@@ -20,6 +22,8 @@ var hud: ZoneHud
 var inv_window: InventoryWindow
 var overlay: DebugOverlay
 var wave: BlowoutWave
+var run: RunManager
+var cache_choice: CacheChoice
 ## Номер попытки (забега) с запуска игры.
 var attempt := 1
 
@@ -40,6 +44,8 @@ func _ready() -> void:
 	bg_layer.add_child(bg)
 	add_child(bg_layer)
 
+	run = RunManager.new()
+	add_child(run)
 	player = Player.new()
 	world.add_child(player)
 	_build_level()
@@ -62,6 +68,9 @@ func _ready() -> void:
 	inv_window = InventoryWindow.new()
 	inv_layer.add_child(inv_window)
 	inv_window.setup(player.inventory, player)
+	cache_choice = preload("res://minigames/anomaly_zone/ui/cache_choice.tscn").instantiate() as CacheChoice
+	inv_layer.add_child(cache_choice)
+	cache_choice.picked.connect(_on_card_picked)
 	hud.set_inventory(player.inventory)
 	hud.set_player(player)
 	player.message.connect(hud.show_message)
@@ -130,9 +139,13 @@ func _build_level() -> void:
 	world.add_child(level)
 	world.move_child(level, 0)  # уровень рисуется под игроком
 	level.finish_sign.reached.connect(_on_finish)
+	for n in level.get_children():
+		if n is Cache:
+			(n as Cache).opened.connect(_on_cache_opened)
 
 
 func _begin_run() -> void:
+	run.new_run(run_seed)
 	_restarting = false
 	_finished = false
 	_time = 0.0
@@ -155,6 +168,25 @@ func _give_all_artifacts() -> void:
 			player.stats.add_artifact(ArtifactDb.make(id))
 			added += 1
 	hud.show_message("Выданы все артефакты" if added > 0 else "Все артефакты уже есть")
+
+
+## Тайник открыт: карты под текущий билд (сид забега), обычный тайник — ещё расходник в рюкзак.
+func _on_cache_opened(cache: Cache) -> void:
+	var cards := Cache.generate_cards(cache.rare, player.stats.artifact_ids(), player.stats.favorite_type(), run.rng)
+	var bonus := ""
+	if not cache.rare:
+		var item := ArtifactDb.make(Cache.bonus_consumable(run.rng))
+		if player.inventory.add_item(item):
+			bonus = item.display_name
+	cache_choice.open(cards, cache.rare, bonus)
+
+
+func _on_card_picked(id: StringName) -> void:
+	if id == &"":
+		return
+	var it := ArtifactDb.make(id)
+	player.stats.add_artifact(it)
+	hud.show_message("Артефакт: " + it.display_name)
 
 
 func _on_item_added(item: ItemData) -> void:

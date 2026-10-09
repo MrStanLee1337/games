@@ -85,6 +85,15 @@ func _pickup(id: StringName, x: float, y: float = FLOOR_Y) -> void:
 	add_child(p)
 
 
+## Тайник: обычный (на трассе) или редкий (в стороне, среди аномалий).
+func _cache(x: float, rare: bool, y: float = FLOOR_Y) -> Cache:
+	var c := Cache.new()
+	c.rare = rare
+	c.position = Vector2(x, y)
+	add_child(c)
+	return c
+
+
 ## Точка А — старт забега.
 func _start(x: float, y: float = FLOOR_Y) -> void:
 	start_pos = Vector2(x, y)

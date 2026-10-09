@@ -71,7 +71,7 @@ const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id": &"bengal", "name": "Бенгальский огонь", "desc": "Искрит, пока аномалии идут одна за другой.",
 		"color": Color("ffd24a"), "shape": ItemData.Shape.SPARK, "tag": -1, "rarity": &"rare",
-		"plus": "Аномалия в течение 1.5 с после предыдущей продлевает все активные баффы на 1 с", "minus": "—",
+		"plus": "Аномалия в течение 1.5 с после предыдущей продлевает все активные баффы на 1 с", "minus": "нет",
 		"flags": {&"bengal": {"window": 1.5, "extend": 1.0}},
 	},
 ]
