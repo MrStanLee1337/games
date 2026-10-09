@@ -3,7 +3,7 @@ extends Resource
 ## Описание предмета. Иконки рисуются примитивами по shape и color.
 
 enum Kind { ARTIFACT, CONSUMABLE }
-enum Shape { CIRCLE, DIAMOND, TRIANGLE, SQUARE, HEXAGON, DROP, CROSS, BAR, BOLT }
+enum Shape { CIRCLE, DIAMOND, TRIANGLE, SQUARE, HEXAGON, DROP, CROSS, BAR, BOLT, SPIKE, SPARK }
 
 @export var id: StringName = &""
 @export var display_name := ""
@@ -78,6 +78,21 @@ func draw_icon(ci: CanvasItem, c: Vector2, size: float) -> void:
 			ci.draw_rect(Rect2(c + Vector2(-r, -r * 0.45), Vector2(r * 2.0, r * 0.9)), Color("e8ecf4"))
 			for k in 3:
 				ci.draw_rect(Rect2(c + Vector2(-r * 0.6 + k * r * 0.5, -r * 0.45), Vector2(r * 0.18, r * 0.9)), color)
+		Shape.SPIKE:
+			# Колючка: звезда с длинными шипами.
+			var sp: Array[Vector2] = []
+			for i in 14:
+				sp.append(Vector2.from_angle(i * TAU / 14.0) * (r if i % 2 == 0 else r * 0.42))
+			ci.draw_colored_polygon(_poly(c, sp), color)
+			ci.draw_circle(c, r * 0.28, light)
+		Shape.SPARK:
+			# Бенгальский огонь: палочка и искры.
+			ci.draw_line(c + Vector2(-r * 0.7, r * 0.8), c + Vector2(r * 0.2, -r * 0.1), Color("aab1c2"), maxf(1.5, r * 0.18))
+			ci.draw_circle(c + Vector2(r * 0.25, -r * 0.15), r * 0.32, light)
+			for i in 6:
+				var dirv := Vector2.from_angle(i * TAU / 6.0 + 0.3)
+				ci.draw_line(c + Vector2(r * 0.25, -r * 0.15) + dirv * r * 0.4, c + Vector2(r * 0.25, -r * 0.15) + dirv * r * 0.85,
+					color, maxf(1.0, r * 0.12))
 
 
 static func _poly(c: Vector2, pts: Array) -> PackedVector2Array:

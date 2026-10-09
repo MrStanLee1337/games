@@ -3,7 +3,7 @@ extends Control
 ## HUD «Зоны: забег»: полоса HP, заряды рывка, иконки баффов с круговыми таймерами, ряд артефактов,
 ## расходники, время и попытка, подсказка по клавишам (H), всплывающие сообщения, экран финиша.
 
-const HINTS := "A/D ← → — бег    Пробел/W — прыжок    S — подкат/ползком/перекат    Shift — рывок (тратит заряд)    E — подобрать    Q — лечение\nTab — рюкзак    S+Пробел — спрыгнуть с платформы    R — забег заново    H — скрыть    F1 — отладка    F2 — артефакты    Esc — выход"
+const HINTS := "A/D ← → — бег    Пробел/W — прыжок    S — подкат/ползком/перекат    Shift — рывок (тратит заряд)    E — подобрать    Q — лечение\nTab — билд    S+Пробел — спрыгнуть с платформы    R — забег заново    H — скрыть    F1 — отладка    F2 — артефакты    Esc — выход"
 
 var _inv: Inventory
 var _player: Player
@@ -150,10 +150,10 @@ func _draw() -> void:
 	if _inv:
 		var n := _inv.count_consumables()
 		if n > 0:
-			draw_string(font, Vector2(x0 + _max_charge * 14.0 + 60.0, pos.y + 14.0), "Q — лечение (%d)" % n,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.7))
-	_draw_buffs(Vector2(42.0, 74.0))
-	_draw_artifacts(Vector2(36.0, 122.0))
+			draw_string(font, pos + Vector2(0.0, 36.0), "Q — лечение (%d)" % n, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+				Color(1, 1, 1, 0.7))
+	_draw_buffs(Vector2(42.0, 92.0))
+	_draw_artifacts(Vector2(36.0, 142.0))
 	var vp := get_viewport_rect().size
 	draw_string(font, Vector2(vp.x - 324.0, 40.0), "%s   Попытка %d" % [_fmt_time(_time), _attempt], HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 20, Color(1, 1, 1, 0.8))
 	if _finish_text != "":

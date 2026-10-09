@@ -1,14 +1,16 @@
 class_name InventoryWindow
 extends Control
-## Окно рюкзака (Tab). Игра на паузе. ЛКМ — выбрать расходник, затем ЛКМ по клетке — переложить;
-## ПКМ — применить расходник. Справа — взятые артефакты (действуют все сразу, выбросить нельзя).
+## Экран билда (Tab). Игра на паузе. Слева — рюкзак с расходниками (ЛКМ — переложить, ПКМ — применить)
+## и итоговые статы; справа — взятые артефакты с плюсами и минусами (действуют все сразу).
 
-const PANEL := Vector2(800.0, 440.0)
-const CELL := 72.0
+const PANEL := Vector2(1120.0, 620.0)
+const CELL := 60.0
 const GAP := 8.0
 const C_PANEL := Color("1d2027")
 const C_SLOT := Color("2a2f3b")
 const C_BORDER := Color("4f596e")
+const C_PLUS := Color("7be08a")
+const C_MINUS := Color("ef7a6c")
 
 var _inv: Inventory
 var _player: Player
@@ -53,7 +55,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"az_inventory"):
 		if visible:
 			close()
-		else:
+		elif not get_tree().paused:
 			open()
 		get_viewport().set_input_as_handled()
 	elif visible and event.is_action_pressed(&"az_exit"):
@@ -62,14 +64,14 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _origin() -> Vector2:
-	return (size - PANEL) * 0.5
+	return ((size - PANEL) * 0.5).max(Vector2.ZERO)
 
 
 func _slot_rect(idx: int) -> Rect2:
 	var o := _origin()
 	var col := idx % Inventory.BACKPACK_COLS
 	var row := idx / Inventory.BACKPACK_COLS
-	return Rect2(o + Vector2(40.0 + col * (CELL + GAP), 130.0 + row * (CELL + GAP)), Vector2(CELL, CELL))
+	return Rect2(o + Vector2(32.0 + col * (CELL + GAP), 104.0 + row * (CELL + GAP)), Vector2(CELL, CELL))
 
 
 func _slot_at(pos: Vector2) -> int:
@@ -112,22 +114,69 @@ func _draw() -> void:
 	var o := _origin()
 	draw_rect(Rect2(o, PANEL), C_PANEL)
 	draw_rect(Rect2(o, PANEL), C_BORDER, false, 2.0)
-	draw_string(font, o + Vector2(40, 48), "Рюкзак", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
-	draw_string(font, o + Vector2(40, 112), "Расходники", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.7))
-	draw_string(font, o + Vector2(440, 112), "Артефакты — действуют все сразу", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.7))
+	draw_string(font, o + Vector2(32, 50), "Билд", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color.WHITE)
+	draw_string(font, o + Vector2(32, 90), "Рюкзак: расходники", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 1, 1, 0.7))
 	for i in _inv.backpack.size():
 		_draw_slot(i)
-	var arts := _player.stats.artifacts
-	if arts.is_empty():
-		draw_string(font, o + Vector2(440, 150), "пока нет", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 1, 1, 0.45))
-	for i in arts.size():
-		var it := arts[i]
-		var c := o + Vector2(460.0, 150.0 + i * 36.0)
-		it.draw_icon(self, c, 24.0)
-		draw_string(font, c + Vector2(24.0, 6.0), it.display_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, it.color.lightened(0.3))
-	draw_multiline_string(font, o + Vector2(40, 390), "ЛКМ — выбрать и переложить, ПКМ — применить расходник.", HORIZONTAL_ALIGNMENT_LEFT, 330, 14, -1, Color(1, 1, 1, 0.55))
-	draw_string(font, o + Vector2(440, PANEL.y - 24), "Tab / Esc — закрыть", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.55))
+	_draw_stats(o + Vector2(32.0, 330.0))
+	_draw_artifacts(o + Vector2(360.0, 90.0))
+	draw_string(font, o + Vector2(32, PANEL.y - 20), "ЛКМ — переложить, ПКМ — применить расходник.   Tab / Esc — закрыть",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.5))
 	_draw_tooltip(_inv.get_item(_hover))
+
+
+## Итоговые статы: конфиг × артефакты (без временных баффов).
+func _draw_stats(pos: Vector2) -> void:
+	var font := ThemeDB.fallback_font
+	var st := _player.stats
+	var cfg := _player.config
+	var dz := AnomalyDb.get_data(Anomaly.Type.ZHARKA)
+	var dt := AnomalyDb.get_data(Anomaly.Type.TRAMPLIN)
+	var dv := AnomalyDb.get_data(Anomaly.Type.VORONKA)
+	var dk := AnomalyDb.get_data(Anomaly.Type.KHOLODETS)
+	var lines: Array[String] = [
+		"Макс. HP %d,  зарядов рывка до %d" % [int(st.max_hp()), st.max_charges()],
+		"Бег %d px/с,  прыжок ×%s,  гравитация ×%s" % [int(cfg.run_speed * st.run_mult()), _n(st.jump_mult()), _n(st.gravity_mult())],
+		"Форсаж: бег ×%s на %s с" % [_n(1.0 + (dz["strength"] - 1.0) * st.buff_mult(Anomaly.Type.ZHARKA)),
+			_n(dz["duration"] * st.buff_duration_mult(Anomaly.Type.ZHARKA))],
+		"Трамплин: подброс %d px" % int(dt["launch"] * st.buff_mult(Anomaly.Type.TRAMPLIN)),
+		"Праща: до %d px/с" % int(cfg.run_speed * dv["cap"] * st.buff_mult(Anomaly.Type.VORONKA)),
+		"Холодец: +%s HP/с, бег ×%s" % [_n(dk["heal"] * st.heal_mult()), _n(minf(1.0, dk["run"] * st.buff_mult(Anomaly.Type.KHOLODETS)))],
+	]
+	var dmg: Array[String] = []
+	for t in [Anomaly.Type.ZHARKA, Anomaly.Type.TRAMPLIN, Anomaly.Type.ELECTRA, Anomaly.Type.VORONKA]:
+		var k := st.damage_mult(t)
+		if not is_equal_approx(k, 1.0):
+			dmg.append("%s ×%s" % [ArtifactDb.ANOMALY_NAMES[t], _n(k)])
+	lines.append("Урон: " + (", ".join(dmg) if not dmg.is_empty() else "обычный"))
+	if st.flag(&"no_stun") != null:
+		lines.append("Электра не оглушает")
+	draw_string(font, pos, "Итог", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
+	for i in lines.size():
+		draw_string(font, pos + Vector2(0.0, 26.0 + i * 22.0), lines[i], HORIZONTAL_ALIGNMENT_LEFT, 300.0, 14, Color("d6dbe6"))
+
+
+## Взятые артефакты: значок, имя (редкие — золотом), плюс, минус, тег.
+func _draw_artifacts(pos: Vector2) -> void:
+	var font := ThemeDB.fallback_font
+	var arts := _player.stats.artifacts
+	draw_string(font, pos, "Артефакты (%d) — действуют все сразу, выбросить нельзя" % arts.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
+		Color(1, 1, 1, 0.7))
+	if arts.is_empty():
+		draw_string(font, pos + Vector2(0.0, 34.0), "пока нет — артефакты лежат в тайниках (E)", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
+			Color(1, 1, 1, 0.45))
+		return
+	var y := pos.y + 24.0
+	for it in arts:
+		var c := Vector2(pos.x + 18.0, y + 22.0)
+		draw_circle(c, 17.0, Color(0, 0, 0, 0.4))
+		it.draw_icon(self, c, 24.0)
+		var name_col := Color("ffd24a") if it.rarity == &"rare" else it.color.lightened(0.3)
+		draw_string(font, Vector2(pos.x + 44.0, y + 14.0), "%s   · %s%s" % [it.display_name, ArtifactDb.tag_name(it.tag),
+			", редкий" if it.rarity == &"rare" else ""], HORIZONTAL_ALIGNMENT_LEFT, 680.0, 16, name_col)
+		draw_string(font, Vector2(pos.x + 44.0, y + 32.0), "+ " + it.plus, HORIZONTAL_ALIGNMENT_LEFT, 680.0, 13, C_PLUS)
+		draw_string(font, Vector2(pos.x + 44.0, y + 48.0), "− " + it.minus, HORIZONTAL_ALIGNMENT_LEFT, 680.0, 13, C_MINUS)
+		y += 60.0
 
 
 func _draw_slot(idx: int) -> void:
@@ -166,3 +215,7 @@ func _draw_tooltip(it: ItemData) -> void:
 	for l in lines:
 		y += 20.0
 		draw_string(font, Vector2(pos.x + pad, y), l, HORIZONTAL_ALIGNMENT_LEFT, w - pad * 2.0, 14, Color("e8ecf4"))
+
+
+static func _n(v: float) -> String:
+	return ArtifactDb._num(snappedf(v, 0.01))
