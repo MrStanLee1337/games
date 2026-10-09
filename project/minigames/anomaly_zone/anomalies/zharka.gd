@@ -8,7 +8,6 @@ extends Anomaly
 	set(v):
 		size = v
 		_rebuild()
-@export var damage := 20.0
 @export var telegraph_time := 0.4
 @export var active_time := 1.0
 @export var cooldown_time := 1.5
@@ -51,14 +50,26 @@ func _new_shape() -> Shape2D:
 	return RectangleShape2D.new()
 
 
+## Аура Пламени: столб на size_mult шире и выше (урон и бафф не меняет).
+func _aura_k() -> float:
+	return float(aura.get("size_mult", 1.0))
+
+
+func set_aura(effects: Dictionary) -> void:
+	var was := _aura_k()
+	super.set_aura(effects)
+	if not is_equal_approx(was, _aura_k()) and _shape_node:
+		_apply_shape(scale_factor())
+
+
 func _apply_shape(s: float) -> void:
-	var sz := size * s
+	var sz := size * s * _aura_k()
 	(_shape_node.shape as RectangleShape2D).size = sz
 	_shape_node.position = Vector2(flame_offset * 0.8, -sz.y * 0.5)
 
 
 func _world_rect() -> Rect2:
-	var k := scale_factor()
+	var k := scale_factor() * _aura_k()
 	return Rect2(global_position + Vector2(-size.x * k * 0.5 + flame_offset * 0.8, -size.y * k), size * k)
 
 
@@ -92,7 +103,7 @@ func _on_state(s: State) -> void:
 		return
 	_particles.emitting = s == State.ACTIVE
 	if s == State.ACTIVE:
-		var k := scale_factor()
+		var k := scale_factor() * _aura_k()
 		_particles.amount = int(10.0 + 14.0 * current_intensity)
 		_particles.position = Vector2(0.0, -6.0)
 		_particles.emission_rect_extents = Vector2(size.x * k * 0.4, 4.0)
@@ -138,8 +149,7 @@ func _tick(delta: float) -> void:
 			if _hit_t <= 0.0:
 				_hit_t = 0.3
 				for p in _players():
-					var away := Vector2(signf(p.global_position.x - global_position.x), -1.2)
-					p.take_damage(dmg(damage), away)
+					p.on_anomaly_contact(anomaly_type, get_instance_id())
 			if _state_t >= active_time:
 				_set_state(State.COOLDOWN)
 		State.COOLDOWN:
@@ -148,7 +158,7 @@ func _tick(delta: float) -> void:
 
 
 func _draw() -> void:
-	var k := scale_factor()
+	var k := scale_factor() * _aura_k()
 	var w := size.x * k
 	var h := size.y * k
 	var r := Rect2(-w * 0.5, -h, w, h)

@@ -1,15 +1,13 @@
 @tool
 class_name Trampolin
 extends Anomaly
-## Трамплин: почти невидимая зона. Вход → импульс от центра (в основном вверх), лёгкий урон.
-## После срабатывания на секунду проявляется.
+## Трамплин: пружинящая зона. Вход → подброс на заданную высоту (AnomalyDb, v = √(2·g·h)), лёгкий урон,
+## бафф Лёгкость. Виден всегда, после срабатывания на секунду ярче.
 
 @export var radius := 50.0:
 	set(v):
 		radius = v
 		_rebuild()
-@export var impulse := 640.0
-@export var damage := 4.0
 @export var cooldown_time := 0.4
 @export var reveal_time := 1.0
 
@@ -32,16 +30,6 @@ func _reset_extra() -> void:
 	_reveal = 0.0
 
 
-## Сила растёт слабее, чем интенсивность: I^0.7 — иначе ×2 даёт запредельную высоту.
-func _strength() -> float:
-	return impulse * pow(current_intensity, 0.7)
-
-
-func _launch_dir(from: Vector2) -> Vector2:
-	var side := clampf((from.x - global_position.x) / (radius * scale_factor()), -1.0, 1.0) * 0.45
-	return Vector2(side, -1.0).normalized()
-
-
 func _tick(delta: float) -> void:
 	_reveal = maxf(0.0, _reveal - delta / reveal_time)
 	var r := scale_factor()
@@ -50,8 +38,7 @@ func _tick(delta: float) -> void:
 			if is_asleep() or not _has_provoker():
 				return
 			for p in _players():
-				p.take_damage(dmg(damage))
-				p.apply_impulse(_launch_dir(p.global_position) * _strength(), 0.15)
+				p.on_anomaly_contact(anomaly_type, get_instance_id())
 			_reveal = 1.0
 			_set_state(State.COOLDOWN)
 		State.COOLDOWN:
@@ -66,7 +53,8 @@ func _draw() -> void:
 		draw_arc(Vector2.ZERO, rr, 0.0, TAU, 32, Color(0.7, 0.7, 0.7, 0.08), 1.0)
 		return
 	var col := Color("9be564")
-	var a := 0.15 + 0.75 * _reveal
+	var a := 0.6 + 0.4 * _reveal
+	draw_rect(Rect2(-rr * 0.8, rr * 0.55, rr * 1.6, 5.0), tint(Color(col, 0.9)))  # пружинящая площадка
 	var ring := rr * (1.0 + 0.04 * sin(_phase * 4.0))
 	draw_circle(Vector2.ZERO, rr, tint(Color(col, a * 0.25)))
 	draw_arc(Vector2.ZERO, ring, 0.0, TAU, 32, tint(Color(col, a)), 2.0)

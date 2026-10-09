@@ -1,15 +1,13 @@
 @tool
 class_name Kholodets
 extends Anomaly
-## Холодец: лужа на полу. Замедляет игрока, наносит урон со временем.
+## Холодец: лужа на полу. Урона нет: замедляет и лечит (AnomalyDb, с артефактами — у игрока).
 ## Начало координат — середина нижнего края лужи (на уровне пола).
 
 @export var size := Vector2(200.0, 18.0):
 	set(v):
 		size = v
 		_rebuild()
-## Урон, HP в секунду.
-@export var dps := 6.0
 
 ## Сухость от жара Жарки: при 1 лужа высыхает насовсем (до сброса аномалий при смерти).
 var dryness := 0.0
@@ -49,10 +47,9 @@ func add_dryness(v: float) -> void:
 
 
 ## Разряд Электры, касающейся лужи, проходит по всей луже.
-func electrify(damage: float, stun_time: float) -> void:
+func electrify(electra_id: int, share: float) -> void:
 	for p in _players():
-		p.take_damage(damage, Vector2(0.0, -1.0), true)
-		p.stun(stun_time)
+		p.on_anomaly_contact(Anomaly.Type.ELECTRA, electra_id, {"damage_scale": share})
 	_shock_t = 0.35
 	_make_shock()
 
@@ -100,10 +97,14 @@ func _tick(delta: float) -> void:
 			_make_shock()
 	if is_asleep():
 		return
-	var slow := clampf(1.0 - 0.5 * current_intensity, 0.2, 1.0)
 	for p in _players():
-		p.set_move_multiplier(slow)
-		p.damage_over_time(dmg(dps) * delta)
+		p.kholodets_tick(delta)
+
+
+func _on_body_entered(b: Node2D) -> void:
+	super._on_body_entered(b)
+	if b is Player and not is_asleep():
+		(b as Player).on_anomaly_contact(anomaly_type, get_instance_id())
 
 
 func _draw() -> void:

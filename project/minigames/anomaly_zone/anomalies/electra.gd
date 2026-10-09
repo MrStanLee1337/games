@@ -7,10 +7,6 @@ extends Anomaly
 	set(v):
 		radius = v
 		_rebuild()
-@export var damage := 25.0
-@export var stun_time := 0.3
-## Сила отброса от центра, px/с.
-@export var knock_impulse := 460.0
 @export var discharge_time := 0.25
 @export var cooldown_time := 2.0
 
@@ -37,15 +33,8 @@ func _reset_extra() -> void:
 func _on_state(s: State) -> void:
 	if s != State.ACTIVE:
 		return
-	var center := global_position
 	for p in _players():
-		var away := (p.global_position - center).normalized()
-		if away == Vector2.ZERO:
-			away = Vector2.UP
-		away.y = minf(away.y, -0.45)  # отброс слегка вверх, чтобы не «прилипать» к полу
-		p.take_damage(dmg(damage), Vector2.ZERO, true)
-		p.apply_impulse(away * knock_impulse, stun_time)
-		p.stun(stun_time)
+		p.on_anomaly_contact(anomaly_type, get_instance_id())
 	# Разряд может уйти в лужу Холодца, которой касается Электра.
 	get_tree().call_group(&"anomaly_interactions", &"on_discharge", self)
 	_regen_zigzags(7)

@@ -41,6 +41,12 @@ var max_charge := PlayerStats.BASE_CHARGES
 var run_multiplier := 1.0
 var jump_multiplier := 1.0
 var gravity_multiplier := 1.0
+# Контакты с аномалиями: часы забега, когда каждая аномалия (instance_id) последний раз дала бафф,
+# время последнего баффа (Бенгальский огонь), Праща (overspeed_drag выключен).
+var _clock := 0.0
+var _buff_seen: Dictionary = {}
+var _last_buff_t := -100.0
+var _sling_t := 0.0
 
 ## Эффективные параметры движения: копия config с учётом пассивов. Только для чтения.
 var m: MovementConfig
@@ -255,6 +261,8 @@ func _tick(delta: float) -> void:
 	_wall_coyote -= delta
 	_wj_lock_t -= delta
 	_regrab_cd -= delta
+	_sling_t -= delta
+	_clock += delta
 	buffs.tick(delta)
 	_ledge_seen_t -= delta
 	_slide_cd -= delta
@@ -287,7 +295,8 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 		if pulled and on_floor:
 			rate *= m.pulled_friction_mult  # под внешней силой трение слабеет, иначе притяжение не чувствуется
 	elif signf(vx) == signf(dir) and absf(vx) > absf(target):
-		rate = m.overspeed_drag if on_floor else m.air_overspeed_drag  # быстрее бега (подкат, толчок) — гаснет плавно
+		# Быстрее бега (подкат, толчок, конец Форсажа) — гаснет плавно; Праща держит скорость.
+		rate = 0.0 if _sling_t > 0.0 else (m.overspeed_drag if on_floor else m.air_overspeed_drag)
 	elif on_floor and vx != 0.0 and signf(vx) != signf(dir):
 		rate = m.turn_accel  # резкий разворот на бегу
 	else:
@@ -881,6 +890,84 @@ func _drop_through(plat: Platform) -> void:
 	_buffer = 0.0
 
 
+# --- Контакт с аномалиями (таблица — AnomalyDb) -----------------------------
+
+## Контакт с аномалией. Урон — с множителями артефактов и только вне неуязвимости (после урона
+## 0.6 с аномалии дают баффы, но не ранят). Бафф — не чаще раза в REPEAT_DELAY от одной аномалии.
+## opts: damage_scale (доля урона, ток по луже), speed (пиковая скорость в Воронке — для Пращи).
+func on_anomaly_contact(type: Anomaly.Type, id: int, opts: Dictionary = {}) -> void:
+	if _dead:
+		return
+	var d := AnomalyDb.get_data(type)
+	var hurt := false
+	var dmg: float = d.get("damage", 0.0) * stats.damage_mult(type) * float(opts.get("damage_scale", 1.0))
+	if dmg > 0.0 and _invuln <= 0.0:
+		hurt = take_damage(dmg)
+	if type == Anomaly.Type.TRAMPLIN:
+		launch(d["launch"] * stats.buff_mult(type))  # подброс — каждый раз, это сама аномалия
+	if _clock - float(_buff_seen.get(id, -100.0)) < AnomalyDb.REPEAT_DELAY:
+		return
+	_buff_seen[id] = _clock
+	match type:
+		Anomaly.Type.ZHARKA:
+			buffs.add(d["buff"], 1.0 + (d["strength"] - 1.0) * stats.buff_mult(type),
+				d["duration"] * stats.buff_duration_mult(type))
+		Anomaly.Type.TRAMPLIN:
+			buffs.add(d["buff"], d["strength"], d["duration"] * stats.buff_duration_mult(type))
+		Anomaly.Type.ELECTRA:
+			add_charge(d["charges"])
+			if hurt and stats.flag(&"no_stun") == null:
+				stun(d["stun"])
+		Anomaly.Type.VORONKA:
+			_sling(float(opts.get("speed", 0.0)), d)
+	stats.count_buff(type)
+	# Бенгальский огонь: аномалия вскоре после предыдущей продлевает все активные баффы.
+	var bengal: Variant = stats.flag(&"bengal")
+	if bengal != null and _clock - _last_buff_t <= bengal["window"]:
+		buffs.extend_all(bengal["extend"])
+	_last_buff_t = _clock
+
+
+## Урон со временем от аномалии (ядро Воронки): с множителем артефактов, не в неуязвимости.
+func anomaly_dot(type: Anomaly.Type, amount: float) -> void:
+	if _invuln <= 0.0:
+		damage_over_time(amount * stats.damage_mult(type))
+
+
+## Холодец изнутри: замедление и лечение (с множителями артефактов), вызывать каждый кадр.
+func kholodets_tick(delta: float) -> void:
+	var d := AnomalyDb.get_data(Anomaly.Type.KHOLODETS)
+	set_move_multiplier(minf(1.0, d["run"] * stats.buff_mult(Anomaly.Type.KHOLODETS)))
+	if hp < max_hp:
+		heal(d["heal"] * stats.heal_mult() * delta)
+
+
+## Подброс на высоту height px: скорость от текущей гравитации, v = √(2 · g · h)
+## (плюс полкадра гравитации — поправка на шаг физики, чтобы высота была ровно height).
+func launch(height: float) -> void:
+	if state in SUPPORT_STATES:
+		_regrab_cd = m.regrab_cooldown
+		change_state(MoveState.FALL)
+	velocity.y = -(sqrt(2.0 * m.gravity * height) + 0.5 * m.gravity * get_physics_process_delta_time())
+	_fall_peak_y = global_position.y
+	_dash_t = 0.0
+	_jumping = false
+	_apex_ok = false
+	_coyote = 0.0
+	_update_state()
+
+
+## Праща: на выходе из Воронки скорость сохраняется (до предела), сопротивление выключено.
+func _sling(peak: float, d: Dictionary) -> void:
+	var cap: float = config.run_speed * d["cap"] * stats.buff_mult(Anomaly.Type.VORONKA)
+	var v := minf(peak, cap)
+	if v > absf(velocity.x):
+		var s := signf(velocity.x) if absf(velocity.x) > 1.0 else float(facing)
+		velocity.x = s * v
+	_sling_t = d["duration"]
+	buffs.add(d["buff"], 1.0, d["duration"])
+
+
 # --- API для внешних сил -------------------------------------------------
 
 ## Резкий толчок. control_lock — сколько секунд управление ослаблено.
@@ -1082,6 +1169,8 @@ func respawn(pos: Vector2, full_heal: bool) -> void:
 func reset_run(pos: Vector2) -> void:
 	inventory.setup()
 	buffs.clear()
+	_buff_seen.clear()
+	_sling_t = 0.0
 	stats.reset()
 	_set_charge(0)
 	respawn(pos, true)
@@ -1090,6 +1179,8 @@ func reset_run(pos: Vector2) -> void:
 ## Новый участок: HP, артефакты и заряды сохраняются, баффы сбрасываются.
 func start_section(pos: Vector2) -> void:
 	buffs.clear()
+	_buff_seen.clear()
+	_sling_t = 0.0
 	respawn(pos, false)
 
 

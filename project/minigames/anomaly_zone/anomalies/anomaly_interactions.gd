@@ -10,7 +10,7 @@ const RULES := {
 	## (rate × I в секунду); на 1.0 лужа высыхает насовсем.
 	&"heat": {"reach": 45.0, "rate": 0.6, "color": Color("ff8a2b")},
 	## Электра, касающаяся Холодца (зазор ≤ reach), пускает разряд по всей луже:
-	## урон share × урон разряда и оглушение всем, кто стоит в луже.
+	## всем в луже — контакт с этой Электрой с уроном share × урон разряда.
 	&"current": {"reach": 6.0, "share": 0.8, "color": Color("6fd6ff")},
 	## Воронка затягивает пламя Жарки, если Жарка в её радиусе: столб отклоняется к ядру
 	## на bend × ширину × min(1, 0.6 × I Воронки).
@@ -114,7 +114,7 @@ func on_discharge(e: Electra) -> void:
 		if k == null or k.is_asleep():
 			continue
 		if Anomaly.rect_gap(e.world_bounds(), k.world_bounds()) <= current["reach"]:
-			k.electrify(e.dmg(e.damage) * current["share"], e.stun_time)
+			k.electrify(e.get_instance_id(), current["share"])
 			_flashes.append({"a": e, "b": k, "t": 0.35})
 
 

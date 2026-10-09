@@ -123,7 +123,6 @@ func _kholodets() -> void:
 	_sign(7380.0, "Холодец жжёт и замедляет,\nа Электра в нём бьёт током всю лужу", 360.0)
 	var k := Kholodets.new()
 	k.size = Vector2(800.0, 18.0)
-	k.dps = 8.0
 	_anomaly(k, Vector2(7920.0, FLOOR_Y))
 	_anomaly(Electra.new(), Vector2(7920.0, FLOOR_Y - 40.0))
 	var z := Zharka.new()

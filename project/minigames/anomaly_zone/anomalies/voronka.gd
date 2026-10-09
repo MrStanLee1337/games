@@ -13,11 +13,11 @@ extends Anomaly
 		_rebuild()
 ## Сила притяжения у самого ядра, px/с².
 @export var pull := 4000.0
-## Урон ядра, HP в секунду.
-@export var core_dps := 25.0
 ## Огненный смерч: урон в кольце вокруг ядра, HP/с при fire = 1.
 @export var fire_dps := 18.0
 
+## Пиковая скорость игрока по x, пока он в зоне притяжения (для Пращи на выходе).
+var _peak := 0.0
 ## 0..2: сколько горящих Жарок затягивает Воронка (AnomalyInteractions).
 var fire := 0.0
 var _fire_target := 0.0
@@ -83,8 +83,17 @@ func _tick(delta: float) -> void:
 		if body is Player:
 			var p := body as Player
 			p.add_external_force(dir * f)
+			_peak = maxf(_peak, absf(p.velocity.x))
 			if d < core:
-				p.damage_over_time(dmg(core_dps) * delta)
+				p.anomaly_dot(anomaly_type, AnomalyDb.get_data(anomaly_type)["dps"] * current_intensity * delta)
+
+
+## Вышел из зоны притяжения — Праща.
+func _on_body_exited(b: Node2D) -> void:
+	super._on_body_exited(b)
+	if b is Player:
+		(b as Player).on_anomaly_contact(anomaly_type, get_instance_id(), {"speed": _peak})
+		_peak = 0.0
 
 
 func _draw() -> void:
