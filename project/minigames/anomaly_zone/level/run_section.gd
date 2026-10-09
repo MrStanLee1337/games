@@ -131,6 +131,11 @@ func _basin() -> void:
 	_open()
 
 
+## Расходник на дороге (Е — подобрать).
+func _item(id: StringName, dx: float = 0.0) -> void:
+	_pickup(id, _x + dx)
+
+
 ## Обычный тайник на дороге.
 func _road_cache(dx: float = 0.0) -> void:
 	_cache(_x + dx, false)
