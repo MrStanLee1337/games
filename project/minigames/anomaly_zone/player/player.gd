@@ -14,12 +14,16 @@ signal slot_selected(idx: int)
 signal charge_changed(value: int, max_value: int)
 signal state_changed(from: MoveState, to: MoveState)
 
-## Группы по схеме ТЗ: на земле (STAND, RUN), в воздухе (JUMP, FALL, DASH, WALL_SLIDE),
-## на опоре (HANG — вис на краю, CLIMB — подтягивание, VAULT — быстрое перелезание).
+## Группы по схеме ТЗ: на земле (STAND, RUN, SLIDE — подкат, CRAWL — ползком, ROLL — перекат),
+## в воздухе (JUMP, FALL, DASH, WALL_SLIDE), на опоре (HANG — вис на краю, CLIMB — подтягивание,
+## VAULT — быстрое перелезание, LADDER — лестница или верёвка).
 ## Оглушение — не состояние, а наложение поверх любого (is_stunned()).
-enum MoveState { STAND, RUN, JUMP, FALL, DASH, WALL_SLIDE, HANG, CLIMB, VAULT }
-const STATE_NAMES := ["стоит", "бег", "прыжок", "падение", "рывок", "скольжение по стене", "вис", "подтягивание", "перелезание"]
-const SUPPORT_STATES := [MoveState.HANG, MoveState.CLIMB, MoveState.VAULT]
+enum MoveState { STAND, RUN, JUMP, FALL, DASH, WALL_SLIDE, HANG, CLIMB, VAULT, SLIDE, CRAWL, ROLL, LADDER }
+const STATE_NAMES := ["стоит", "бег", "прыжок", "падение", "рывок", "скольжение по стене", "вис", "подтягивание",
+	"перелезание", "подкат", "ползком", "перекат", "лестница"]
+const SUPPORT_STATES := [MoveState.HANG, MoveState.CLIMB, MoveState.VAULT, MoveState.LADDER]
+## Состояния с низким хитбоксом (crouch_height); из них выходят явно.
+const CROUCH_STATES := [MoveState.SLIDE, MoveState.CRAWL, MoveState.ROLL]
 
 @export var config: MovementConfig = preload("res://minigames/anomaly_zone/player/movement_default.tres")
 
@@ -112,6 +116,28 @@ var _climb_to := Vector2.ZERO
 var _climb_t := 0.0
 var _climb_total := 1.0
 var _climb_keep_vx := 0.0
+# Подкат, ползком, перекат, падение.
+var _shape: RectangleShape2D
+var _cs: CollisionShape2D
+var _crouched := false
+var _slide_t := 0.0
+var _slide_cd := 0.0
+## S нажата в этом кадре (свой фронт: на нём подкат отличается от «ползком»).
+var _down_edge := false
+var _down_was := false
+var _roll_t := 0.0
+## S нажата в воздухе — перекат, если касание в ближайшие roll_window_before.
+var _roll_buf := 0.0
+## Жёсткое приземление ждёт roll_window_after: успел нажать S — перекат.
+var _land_grace := 0.0
+var _land_h := 0.0
+## Верхняя точка текущего полёта (для урона от падения).
+var _fall_peak_y := 0.0
+## Высота последнего приземления, px (для оверлея F1).
+var last_fall := 0.0
+# Лестница.
+var _ladder: Ladder = null
+var _ladder_down_t := 0.0
 
 
 func _ready() -> void:
@@ -119,11 +145,12 @@ func _ready() -> void:
 	add_to_group(&"player")
 	collision_layer = 2
 	collision_mask = 1
-	var cs := CollisionShape2D.new()
-	var rect := RectangleShape2D.new()
-	rect.size = body_size
-	cs.shape = rect
-	add_child(cs)
+	_cs = CollisionShape2D.new()
+	_shape = RectangleShape2D.new()
+	_shape.size = body_size
+	_cs.shape = _shape
+	add_child(_cs)
+	_fall_peak_y = global_position.y
 	_camera = Camera2D.new()
 	_camera.position_smoothing_enabled = true
 	_camera.position_smoothing_speed = m.cam_smoothing
@@ -148,8 +175,13 @@ func _physics_process(delta: float) -> void:
 	_force_acc = Vector2.ZERO
 	_mult_acc = 1.0
 	_tick(delta)
+	if is_on_floor() or state in SUPPORT_STATES or _sliding:
+		_fall_peak_y = global_position.y
 
 	var stunned := _stun > 0.0
+	var down := Input.is_action_pressed(&"az_down")
+	_down_edge = down and not _down_was
+	_down_was = down
 	var dir := 0.0 if stunned else Input.get_axis(&"az_left", &"az_right")
 	if dir != 0.0 and state != MoveState.DASH:
 		facing = 1 if dir > 0.0 else -1
@@ -176,6 +208,15 @@ func _physics_process(delta: float) -> void:
 		_try_interact()
 	if Input.is_action_just_pressed(&"az_heal"):
 		use_best_consumable()
+	if not stunned and Input.is_action_just_pressed(&"az_down") and not is_on_floor() and state not in SUPPORT_STATES:
+		_roll_buf = m.roll_window_before
+	_land_grace_tick(delta)
+	if not stunned:
+		_try_ladder()
+		if is_on_floor() and state in [MoveState.STAND, MoveState.RUN]:
+			_ground_down_actions()
+	if _crouched and state not in CROUCH_STATES and _can_stand():
+		_set_crouch(false)
 
 	match state:
 		MoveState.HANG:
@@ -186,6 +227,12 @@ func _physics_process(delta: float) -> void:
 			return
 		MoveState.DASH:
 			_state_dash()
+		MoveState.SLIDE, MoveState.ROLL:
+			_state_slide(delta, boost)
+		MoveState.CRAWL:
+			_state_crawl(delta, dir, slow, boost)
+		MoveState.LADDER:
+			_state_ladder(delta, dir)
 		_:
 			# Стоит, бег, прыжок, падение, скольжение по стене делят одну физику.
 			_move(delta, dir, slow, ext != Vector2.ZERO, boost)
@@ -196,13 +243,18 @@ func _physics_process(delta: float) -> void:
 	var fall_speed := velocity.y
 	landing_speed = 0.0
 	move_and_slide()
-	if not was_on_floor and is_on_floor():
+	if state == MoveState.LADDER:
+		_ladder_after_move(fall_speed)
+	elif not was_on_floor and is_on_floor():
 		landing_speed = maxf(0.0, fall_speed)
+		_on_landed(global_position.y - _fall_peak_y, landing_speed)
+	_fall_peak_y = minf(_fall_peak_y, global_position.y)
 	_update_state()
-	if not stunned:
+	if not stunned and not _crouched:
 		if is_on_floor():
-			_try_vault(dir)
-		elif state != MoveState.DASH:
+			if state in [MoveState.STAND, MoveState.RUN]:
+				_try_vault(dir)
+		elif state not in SUPPORT_STATES and state != MoveState.DASH:
 			_try_ledge_grab(dir)
 
 
@@ -230,6 +282,8 @@ func _tick(delta: float) -> void:
 	_wj_lock_t -= delta
 	_regrab_cd -= delta
 	_ledge_seen_t -= delta
+	_slide_cd -= delta
+	_roll_buf -= delta
 	if _fall_through_t > 0.0:
 		_fall_through_t -= delta
 		if _fall_through_t <= 0.0 and is_instance_valid(_fall_through):
@@ -252,7 +306,6 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 	if _wj_lock_t > 0.0 and dir != 0.0 and int(signf(dir)) == _wj_dir:
 		ctl *= m.wall_jump_control  # сразу после отскока к стене не тянет обратно
 	var on_floor := is_on_floor()
-	_sliding = false
 	var target := dir * m.run_speed * slow
 	var vx := velocity.x
 	var rate: float
@@ -261,15 +314,22 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 		if pulled and on_floor:
 			rate *= m.pulled_friction_mult  # под внешней силой трение слабеет, иначе притяжение не чувствуется
 	elif signf(vx) == signf(dir) and absf(vx) > absf(target):
-		rate = m.overspeed_drag  # быстрее бега (после рывка, толчка) — гаснет плавно
+		rate = m.overspeed_drag if on_floor else m.air_overspeed_drag  # быстрее бега (подкат, толчок) — гаснет плавно
 	elif on_floor and vx != 0.0 and signf(vx) != signf(dir):
 		rate = m.turn_accel  # резкий разворот на бегу
 	else:
 		rate = m.ground_accel if on_floor else m.air_accel
 	velocity.x = move_toward(vx, target, rate * ctl * delta)
+	_vertical(delta, dir, boost)
 
+
+## Прыжок, отскок от стены, гравитация, скольжение по стене, обрезка прыжка.
+func _vertical(delta: float, dir: float, boost: float) -> void:
+	var on_floor := is_on_floor()
+	_sliding = false
 	# Сначала толчок прыжка, потом гравитация того же кадра (полунеявный Эйлер, как в расчётах ТЗ).
-	if _buffer > 0.0 and _coyote > 0.0:
+	if _buffer > 0.0 and _coyote > 0.0 and _can_stand():
+		_set_crouch(false)  # прыжок из подката, ползком и переката — встаём
 		velocity.y = -m.jump_velocity * boost
 		_buffer = 0.0
 		_coyote = 0.0
@@ -307,6 +367,8 @@ func _move(delta: float, dir: float, slow: float, pulled: bool, boost: float) ->
 
 
 func _try_dash(dir: float) -> void:
+	if state in SUPPORT_STATES:
+		return
 	if not has_dash and charge <= 0:
 		if _no_dash_hint_t <= 0.0:
 			message.emit("Рывок — только с Вспышкой (или заряд Батарейки)")
@@ -499,6 +561,240 @@ func _try_vault(dir: float) -> void:
 	if not _box_free(stand):
 		return
 	_start_climb(stand, m.vault_time, s * maxf(absf(velocity.x), m.run_speed * 0.8), MoveState.VAULT)
+
+
+# --- Подкат, ползком, перекат, урон от падения --------------------------------
+
+## Низкий хитбокс (crouch_height), прижатый к ногам; центр узла не двигается.
+func _set_crouch(on: bool) -> void:
+	if on == _crouched:
+		return
+	_crouched = on
+	var h := m.crouch_height if on else body_size.y
+	_shape.size = Vector2(body_size.x, h)
+	_cs.position.y = (body_size.y - h) * 0.5
+
+
+## Можно ли встать в полный рост (односторонние платформы над головой не мешают).
+func _can_stand() -> bool:
+	return not _crouched or not test_move(global_transform, Vector2(0.0, -(body_size.y - m.crouch_height)))
+
+
+## S на земле: на бегу — подкат, стоя или медленно — ползком.
+func _ground_down_actions() -> void:
+	if _down_edge and _slide_cd <= 0.0 \
+			and absf(velocity.x) >= m.run_speed * m.slide_min_speed:
+		_start_slide()
+	elif Input.is_action_pressed(&"az_down"):
+		_set_crouch(true)
+		change_state(MoveState.CRAWL)
+
+
+func _start_slide() -> void:
+	_set_crouch(true)
+	var s := signf(velocity.x) if velocity.x != 0.0 else float(facing)
+	velocity.x = s * maxf(m.slide_speed, absf(velocity.x))
+	_slide_t = m.slide_time
+	_slide_cd = m.slide_time + m.slide_cooldown
+	change_state(MoveState.SLIDE)
+
+
+## Перекат: низкий хитбокс, скорость бега сохраняется.
+func _start_roll() -> void:
+	_set_crouch(true)
+	var dir := Input.get_axis(&"az_left", &"az_right")
+	var s := signf(dir) if dir != 0.0 else (signf(velocity.x) if absf(velocity.x) > 5.0 else float(facing))
+	facing = int(s)
+	velocity.x = s * maxf(m.run_speed, absf(velocity.x))
+	_roll_t = m.roll_time
+	change_state(MoveState.ROLL)
+
+
+## Подкат (трение) и перекат (скорость держится). Из обоих можно прыгнуть, скорость сохраняется.
+func _state_slide(delta: float, boost: float) -> void:
+	if state == MoveState.SLIDE:
+		_slide_t -= delta
+		velocity.x = move_toward(velocity.x, 0.0, m.slide_friction * delta)
+		if _slide_t <= 0.0:
+			_end_low_move()
+	else:
+		_roll_t -= delta
+		if _roll_t <= 0.0:
+			_end_low_move()
+	_vertical(delta, 0.0, boost)
+
+
+## Конец подката или переката: есть место — встаём, над головой потолок — ползём.
+func _end_low_move() -> void:
+	if _can_stand():
+		_set_crouch(false)
+		change_state(MoveState.RUN if absf(velocity.x) > 5.0 else MoveState.STAND)
+	else:
+		change_state(MoveState.CRAWL)
+
+
+## Ползком: пока зажата S или над головой потолок.
+func _state_crawl(delta: float, dir: float, slow: float, boost: float) -> void:
+	if not Input.is_action_pressed(&"az_down") and _can_stand():
+		_set_crouch(false)
+		change_state(MoveState.STAND)
+		_move(delta, dir, slow, false, boost)
+		return
+	var rate := m.ground_accel if dir != 0.0 else m.ground_decel
+	velocity.x = move_toward(velocity.x, dir * m.crawl_speed * slow, rate * delta)
+	_vertical(delta, 0.0, boost)
+
+
+## Приземление с высоты h (от верхней точки полёта).
+func _on_landed(h: float, speed: float) -> void:
+	last_fall = h
+	var hurt := h > m.safe_fall_height and speed >= m.fall_damage_min_speed
+	if _roll_buf > 0.0:
+		_roll_buf = 0.0
+		if h >= m.roll_min_fall:
+			_start_roll()
+			if hurt:
+				_fall_hurt(h, true)
+			return
+		if absf(velocity.x) >= m.run_speed * m.slide_min_speed and _slide_cd <= 0.0:
+			_start_slide()  # невысоко: S перед касанием — сразу в подкат
+			return
+	if hurt:
+		_land_h = h
+		_land_grace = m.roll_window_after
+
+
+## Жёсткое приземление ждёт roll_window_after: нажал S — перекат, нет — урон и оглушение.
+func _land_grace_tick(delta: float) -> void:
+	if _land_grace <= 0.0:
+		return
+	if Input.is_action_just_pressed(&"az_down") and is_on_floor():
+		_land_grace = 0.0
+		_start_roll()
+		_fall_hurt(_land_h, true)
+		return
+	_land_grace -= delta
+	if _land_grace <= 0.0:
+		_fall_hurt(_land_h, false)
+
+
+func _fall_hurt(h: float, rolled: bool) -> void:
+	var dmg := m.fall_damage(h)
+	if rolled:
+		dmg = dmg * m.roll_lethal_mult if h > m.lethal_fall_height else 0.0
+	else:
+		stun(m.hard_land_stun)
+	if dmg > 0.0:
+		take_damage(dmg, Vector2.ZERO, true)
+
+
+# --- Лестница и верёвка ----------------------------------------------------
+
+func _find_ladder() -> Ladder:
+	var half := body_size * 0.5
+	for n in get_tree().get_nodes_in_group(&"ladders"):
+		var l := n as Ladder
+		var r := l.zone_rect()
+		if absf(global_position.x - r.get_center().x) <= r.size.x * 0.5 + 4.0 \
+				and global_position.y + half.y >= r.position.y - 1.0 and global_position.y - half.y <= r.end.y - 8.0:
+			return l
+	return null
+
+
+## W / S внутри зоны лестницы — зацепиться; в воздухе — автоматически с зажатым W.
+func _try_ladder() -> void:
+	if _regrab_cd > 0.0 or state in SUPPORT_STATES or state == MoveState.DASH:
+		return
+	var lad := _find_ladder()
+	if lad == null:
+		return
+	var r := lad.zone_rect()
+	var feet := global_position.y + body_size.y * 0.5
+	var up_ok := r.position.y < feet - 4.0  # стоя на верхней площадке, W — обычный прыжок
+	var down_ok := r.end.y > feet + 4.0  # стоя у подножия, S — присесть
+	var up := Input.is_action_pressed(&"az_up") if not is_on_floor() else Input.is_action_just_pressed(&"az_up")
+	var want := (up and up_ok) or (Input.is_action_just_pressed(&"az_down") and down_ok)
+	if not want or not _can_stand():
+		return
+	_set_crouch(false)
+	_ladder = lad
+	_ladder_down_t = 0.0
+	if lad.top_platform:
+		if _fall_through == lad.top_platform:
+			_fall_through = null
+		add_collision_exception_with(lad.top_platform)
+	global_position.x = r.get_center().x
+	velocity = Vector2.ZERO
+	_buffer = 0.0
+	_jumping = false
+	_apex_ok = false
+	_land_grace = 0.0
+	change_state(MoveState.LADDER)
+
+
+## На лестнице: W вверх, S вниз (дольше ladder_slide_delay — съезжаешь), Пробел — спрыгнуть.
+func _state_ladder(delta: float, dir: float) -> void:
+	_buffer = 0.0
+	velocity = Vector2.ZERO
+	if not is_instance_valid(_ladder):
+		change_state(MoveState.FALL)
+		return
+	if is_stunned():
+		return
+	if Input.is_action_just_pressed(&"az_jump") and not Input.is_action_just_pressed(&"az_up"):
+		_regrab_cd = m.regrab_cooldown
+		if dir != 0.0:
+			facing = int(signf(dir))
+			velocity = Vector2(facing * m.ladder_jump_out, -m.ladder_jump_up)
+			_jumping = true
+			change_state(MoveState.JUMP)
+		else:
+			change_state(MoveState.FALL)
+		return
+	var vy := 0.0
+	if Input.is_action_pressed(&"az_up"):
+		vy = -m.ladder_up_speed
+		_ladder_down_t = 0.0
+	elif Input.is_action_pressed(&"az_down"):
+		_ladder_down_t += delta
+		vy = m.ladder_slide_speed if _ladder_down_t > m.ladder_slide_delay else m.ladder_down_speed
+	else:
+		_ladder_down_t = 0.0
+	var r := _ladder.zone_rect()
+	var half := body_size * 0.5
+	if vy < 0.0:
+		if _ladder.one_way_top and global_position.y + half.y + vy * delta <= r.position.y:
+			global_position.y = r.position.y - half.y - 0.5  # вылез на верхнюю площадку
+			change_state(MoveState.STAND)
+			return
+		if not _ladder.one_way_top:
+			var min_y := r.position.y + half.y - 8.0  # верёвка: руки у верхнего края
+			vy = maxf(vy, minf(0.0, (min_y - global_position.y) / delta))
+	velocity.y = vy
+
+
+func _ladder_after_move(fall_speed: float) -> void:
+	if fall_speed > 0.0 and is_on_floor():
+		change_state(MoveState.STAND)  # спустился до земли
+	elif not is_instance_valid(_ladder) or global_position.y - body_size.y * 0.5 > _ladder.zone_rect().end.y - 8.0:
+		_regrab_cd = m.regrab_cooldown  # съехал с оборванного конца
+		change_state(MoveState.FALL)
+
+
+## Ушли с лестницы: исключение с верхней площадкой снимаем сразу, если стоим на ней,
+## иначе чуть позже (как при спрыгивании сквозь платформу).
+func _release_ladder() -> void:
+	var top: Platform = _ladder.top_platform if is_instance_valid(_ladder) else null
+	_ladder = null
+	if top == null:
+		return
+	if global_position.y + body_size.y * 0.5 <= top.global_position.y + 0.5:
+		remove_collision_exception_with(top)
+	else:
+		if is_instance_valid(_fall_through) and _fall_through != top:
+			remove_collision_exception_with(_fall_through)
+		_fall_through = top
+		_fall_through_t = 0.15
 
 
 func _state_dash() -> void:
@@ -705,6 +1001,8 @@ func change_state(s: MoveState) -> void:
 		return
 	var from := state
 	state = s
+	if from == MoveState.LADDER:
+		_release_ladder()
 	var line := "%.2f %s → %s" % [Time.get_ticks_msec() / 1000.0, STATE_NAMES[from], STATE_NAMES[s]]
 	state_log.append(line)
 	if state_log.size() > 6:
@@ -717,11 +1015,16 @@ func change_state(s: MoveState) -> void:
 ## Состояние по факту: рывок, на земле (стоит/бег) или в воздухе (прыжок/падение).
 func _update_state() -> void:
 	if state in SUPPORT_STATES:
-		return  # из виса и подтягивания выходят явно
+		return  # из виса, подтягивания и лестницы выходят явно
+	if state in CROUCH_STATES and is_on_floor():
+		return  # из подката, переката и ползком — тоже
 	if _dash_t > 0.0:
 		change_state(MoveState.DASH)
 	elif is_on_floor():
-		change_state(MoveState.RUN if absf(velocity.x) > 5.0 else MoveState.STAND)
+		if _crouched:
+			change_state(MoveState.CRAWL)  # приземлился под низким потолком
+		else:
+			change_state(MoveState.RUN if absf(velocity.x) > 5.0 else MoveState.STAND)
 	elif _sliding:
 		change_state(MoveState.WALL_SLIDE)
 	else:
@@ -782,7 +1085,11 @@ func respawn(pos: Vector2, full_heal: bool) -> void:
 	_stun = 0.0
 	_regrab_cd = 0.0
 	_wall_jumps = 0
+	_roll_buf = 0.0
+	_land_grace = 0.0
+	_fall_peak_y = pos.y
 	change_state(MoveState.FALL)
+	_set_crouch(false)
 	_dead = false
 	visible = true
 	_invuln = 0.8
@@ -807,7 +1114,10 @@ func _draw() -> void:
 	var col := Color("dfe3ee")
 	if state == MoveState.DASH:
 		col = Color("ffe46b") if _charged_dash else Color("8fd3ff")
+	elif state == MoveState.ROLL:
+		col = Color("c8f0c0")
 	var half := body_size * 0.5
-	draw_rect(Rect2(-half, body_size), col)
+	var top := half.y - m.crouch_height if _crouched else -half.y
+	draw_rect(Rect2(Vector2(-half.x, top), Vector2(body_size.x, half.y - top)), col)
 	var eye_x := half.x - 12.0 if facing > 0 else -half.x + 2.0
-	draw_rect(Rect2(Vector2(eye_x, -half.y + 8.0), Vector2(10.0, 5.0)), Color("15171c"))
+	draw_rect(Rect2(Vector2(eye_x, top + (5.0 if _crouched else 8.0)), Vector2(10.0, 5.0)), Color("15171c"))

@@ -24,6 +24,8 @@ extends Resource
 @export var air_decel := 900.0
 ## Скорость выше бега (после рывка, толчка) при вводе в ту же сторону гаснет плавно.
 @export var overspeed_drag := 250.0
+## То же в воздухе: подобрано так, чтобы прыжок из подката давал ~238 px.
+@export var air_overspeed_drag := 180.0
 ## Трение на земле, пока действует внешняя сила (иначе притяжение Воронки не чувствуется).
 @export var pulled_friction_mult := 0.25
 
@@ -80,6 +82,48 @@ extends Resource
 @export var vault_time := 0.12
 @export var vault_max_height := 24.0
 
+@export_group("Подкат и ползком")
+## Подкат: S на бегу (скорость не ниже slide_min_speed × бег).
+@export var slide_speed := 400.0
+@export var slide_friction := 500.0
+@export var slide_time := 0.45
+@export_range(0.0, 1.0) var slide_min_speed := 0.8
+@export var slide_cooldown := 0.3
+## Высота хитбокса в подкате, ползком и в перекате, px.
+@export var crouch_height := 24.0
+@export var crawl_speed := 70.0
+
+@export_group("Падение и перекат")
+## Урон от падения по высоте от верхней точки: до safe — 0; от safe до lethal — от min до max
+## линейно; выше lethal — fall_damage_lethal.
+@export var safe_fall_height := 288.0
+@export var lethal_fall_height := 576.0
+@export var fall_damage_min := 10.0
+@export var fall_damage_max := 60.0
+@export var fall_damage_lethal := 100.0
+## Медленная посадка (парение, пар) не ранит, даже если высота большая.
+@export var fall_damage_min_speed := 500.0
+## Перекат: S за roll_window_before до касания или roll_window_after после.
+@export var roll_window_before := 0.15
+@export var roll_window_after := 0.05
+@export var roll_time := 0.35
+## Перекат отменяет урон до lethal_fall_height, выше — умножает на это.
+@export var roll_lethal_mult := 0.5
+## Ниже этой высоты S перед касанием — не перекат, а подкат или присед.
+@export var roll_min_fall := 96.0
+## Жёсткое приземление (без переката, выше safe) — оглушение вдобавок к урону.
+@export var hard_land_stun := 0.3
+
+@export_group("Лестница")
+@export var ladder_up_speed := 160.0
+@export var ladder_down_speed := 220.0
+## Держишь S дольше этого — съезжаешь быстро.
+@export var ladder_slide_delay := 0.3
+@export var ladder_slide_speed := 480.0
+## Пробел с направлением — прыжок вбок.
+@export var ladder_jump_out := 200.0
+@export var ladder_jump_up := 380.0
+
 @export_group("Рывок (Вспышка)")
 @export var dash_speed := 850.0
 @export var dash_time := 0.2
@@ -109,6 +153,16 @@ var jump_velocity := 0.0
 
 func body_size() -> Vector2:
 	return Vector2(hero_width, hero_height)
+
+
+## Урон от падения с высоты h (без переката).
+func fall_damage(h: float) -> float:
+	if h <= safe_fall_height:
+		return 0.0
+	if h > lethal_fall_height:
+		return fall_damage_lethal
+	var t := (h - safe_fall_height) / (lethal_fall_height - safe_fall_height)
+	return lerpf(fall_damage_min, fall_damage_max, t)
 
 
 ## Пересчёт выводимых величин с пассивами артефактов.

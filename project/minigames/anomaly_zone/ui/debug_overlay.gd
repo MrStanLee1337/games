@@ -47,6 +47,7 @@ func _draw() -> void:
 		"%s%s  vx %d  vy %d" % [player.state_name(), "  ОГЛУШЁН" if player.is_stunned() else "", int(player.velocity.x), int(player.velocity.y)],
 		"койот %.2f  буфер %.2f" % [maxf(0.0, player._coyote), maxf(0.0, player._buffer)],
 		"расчёт прыжка: высота %d, дальность %d px" % [int(jp.x), int(jp.y)],
+		"последнее падение %d px (без урона до %d)" % [int(player.last_fall), int(player.m.safe_fall_height)],
 	]
 	for i in lines.size():
 		_text(font, pc + Vector2(-70.0, -138.0 + i * 15.0), lines[i])
