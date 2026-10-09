@@ -45,12 +45,23 @@ func _floor(x1: float, x2: float) -> void:
 	_plat(x1, FLOOR_Y, x2 - x1, 300.0)
 
 
-func _plat(x: float, y: float, w: float, h: float, one_way: bool = false) -> void:
+func _plat(x: float, y: float, w: float, h: float, one_way: bool = false) -> Platform:
 	var p := Platform.new()
 	p.position = Vector2(x, y)
 	p.size = Vector2(w, h)
 	p.one_way = one_way
 	add_child(p)
+	return p
+
+
+## Лестница (или верёвка без площадки): x — левый край, от y_top до y_bottom.
+func _ladder(x: float, y_top: float, y_bottom: float, one_way_top: bool = true) -> Ladder:
+	var l := Ladder.new()
+	l.position = Vector2(x, y_top)
+	l.size = Vector2(28.0, y_bottom - y_top)
+	l.one_way_top = one_way_top
+	add_child(l)
+	return l
 
 
 func _anomaly(a: Anomaly, pos: Vector2) -> void:
@@ -72,9 +83,9 @@ func _checkpoint(x: float) -> void:
 	checkpoints.append(c)
 
 
-func _sign(x: float, text: String, w: float = 320.0) -> void:
+func _sign(x: float, text: String, w: float = 320.0, y: float = FLOOR_Y) -> void:
 	var s := SignPost.new()
-	s.position = Vector2(x, FLOOR_Y)
+	s.position = Vector2(x, y)
 	s.text = text
 	s.width = w
 	add_child(s)

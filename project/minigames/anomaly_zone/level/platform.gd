@@ -12,6 +12,11 @@ extends StaticBody2D
 	set(v):
 		one_way = v
 		_rebuild()
+## Гнилой край: за него нельзя зацепиться (только допрыгнуть).
+@export var no_grab := false:
+	set(v):
+		no_grab = v
+		queue_redraw()
 
 var _shape: CollisionShape2D
 
@@ -45,3 +50,11 @@ func _draw() -> void:
 	else:
 		draw_rect(Rect2(Vector2.ZERO, size), Color("2a2f3b"))
 		draw_rect(Rect2(Vector2.ZERO, Vector2(size.x, 3.0)), Color("4f596e"))
+	if no_grab:
+		# Гнилые доски: рыжие трещины по краю.
+		var col := Color("9a6a3a")
+		draw_rect(Rect2(Vector2.ZERO, Vector2(size.x, 4.0)), col)
+		var x := 6.0
+		while x < size.x:
+			draw_line(Vector2(x, 4.0), Vector2(x + 4.0, 10.0), col, 1.5)
+			x += 14.0

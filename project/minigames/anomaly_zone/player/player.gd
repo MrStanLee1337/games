@@ -495,10 +495,14 @@ func _box_free(c: Vector2) -> bool:
 func _find_ledge(s: int) -> Dictionary:
 	var half := body_size * 0.5
 	var px := global_position.x + s * (half.x + 3.0)
-	var hit := _ray(Vector2(px, global_position.y - half.y - m.ledge_above_head),
+	# При быстром падении край проскакивает полосу за кадр — ищем его и на пройденном за кадр пути.
+	var swept := maxf(0.0, velocity.y) * get_physics_process_delta_time()
+	var hit := _ray(Vector2(px, global_position.y - half.y - m.ledge_above_head - swept),
 		Vector2(px, global_position.y - m.ledge_chest_offset))
 	if hit.is_empty():
 		return {}
+	if hit.collider is Platform and (hit.collider as Platform).no_grab:
+		return {}  # гнилой край
 	var top: float = hit.position.y
 	var side := _ray(Vector2(global_position.x, top + 2.0), Vector2(global_position.x + s * (half.x + 8.0), top + 2.0))
 	if side.is_empty():
@@ -1053,6 +1057,7 @@ func apply_impulse(v: Vector2, control_lock: float = 0.0) -> void:
 		change_state(MoveState.FALL)
 	if v.y < 0.0:
 		velocity.y = minf(velocity.y, 0.0)  # подброс не должен «съедаться» падением
+		_fall_peak_y = global_position.y  # подброс (Трамплин) начинает новый полёт: прежняя высота не считается
 	velocity += v
 	_dash_t = 0.0
 	_jumping = false
